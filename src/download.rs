@@ -1,3 +1,10 @@
+//! Blocking GET of `ReleasableAircraft.zip`.
+//!
+//! Keep UA, Accept, Accept-Language, gzip, 503×4 backoff, and `Server` in
+//! error strings in lockstep with `tail-to-ticker/crates/http-get/src/lib.rs`
+//! and `tail-to-ticker/crates/faa-ingest/src/download.rs`. Do not extract a
+//! shared crate across git repos.
+
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 use std::time::Duration;
@@ -86,6 +93,16 @@ pub fn read_zip_file(path: &Path) -> Result<Vec<u8>> {
     std::fs::read(path).with_context(|| format!("read {}", path.display()))
 }
 
+/// Atomically write `ReleasableAircraft.zip` under `dir` for later `--zip` reruns.
+pub fn write_zip_cache(dir: &Path, bytes: &[u8]) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    let dest = dir.join("ReleasableAircraft.zip");
+    let tmp = dir.join("ReleasableAircraft.zip.tmp");
+    std::fs::write(&tmp, bytes).with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &dest).with_context(|| format!("rename {}", dest.display()))?;
+    Ok(())
+}
+
 pub fn extract_named(zip_bytes: &[u8], filename: &str) -> Result<Vec<u8>> {
     let mut archive =
         ZipArchive::new(Cursor::new(zip_bytes)).context("open zip archive")?;
@@ -137,5 +154,24 @@ mod tests {
     fn resolve_user_agent_prefers_cli() {
         assert_eq!(resolve_user_agent(Some("CustomUA/1")), "CustomUA/1");
         assert_eq!(resolve_user_agent(Some("")), FAA_DOWNLOAD_USER_AGENT);
+    }
+
+    #[test]
+    fn write_zip_cache_replaces_atomically() {
+        let dir = std::env::temp_dir().join(format!(
+            "faa-zip-cache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_zip_cache(&dir, b"first").unwrap();
+        write_zip_cache(&dir, b"second").unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("ReleasableAircraft.zip")).unwrap(),
+            b"second"
+        );
+        assert!(!dir.join("ReleasableAircraft.zip.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

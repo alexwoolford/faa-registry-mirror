@@ -36,8 +36,8 @@ acquire_lock() {
 acquire_lock
 
 echo "== faa-registry-mirror ingest =="
-echo "bin=$BIN work=$WORK publish=$PUBLISH"
-"$BIN" --db "$SRC" ingest
+echo "bin=$BIN work=$WORK cache=$CACHE publish=$PUBLISH"
+"$BIN" --db "$SRC" ingest --cache-dir "$CACHE"
 
 test -s "$SRC" || {
   echo "missing $SRC" >&2

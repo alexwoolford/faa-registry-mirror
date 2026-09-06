@@ -14,7 +14,12 @@ use faa_registry_mirror::download::{resolve_user_agent, DEFAULT_ZIP_URL};
 )]
 struct Cli {
     /// SQLite database path
-    #[arg(long, global = true, default_value = "data/faa-registry.sqlite")]
+    #[arg(
+        long,
+        global = true,
+        default_value = "data/faa-registry.sqlite",
+        env = "FAA_REGISTRY_DB"
+    )]
     db: PathBuf,
 
     #[command(subcommand)]
@@ -28,6 +33,9 @@ enum Command {
         /// Local zip instead of downloading
         #[arg(long)]
         zip: Option<PathBuf>,
+        /// After an origin GET, write ReleasableAircraft.zip here for later `--zip` reruns
+        #[arg(long, env = "FAA_REGISTRY_CACHE")]
+        cache_dir: Option<PathBuf>,
         /// FAA zip URL used when --zip is omitted
         #[arg(long, default_value = DEFAULT_ZIP_URL)]
         url: String,
@@ -58,8 +66,8 @@ enum Command {
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("faa_registry_mirror=info".parse()?),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
@@ -67,6 +75,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Ingest {
             zip,
+            cache_dir,
             url,
             min_master_rows,
             force,
@@ -75,6 +84,7 @@ fn main() -> Result<()> {
             let stats = ingest::ingest(&IngestOptions {
                 db_path: cli.db,
                 zip_path: zip,
+                cache_dir,
                 zip_url: url,
                 min_master_rows,
                 force,

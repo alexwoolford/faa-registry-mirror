@@ -2,6 +2,7 @@
 name = "faa-registry-mirror"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80"
 description = "Download, parse, and historically track FAA aircraft ownership in SQLite"
 license = "MIT"
 
@@ -17,7 +18,7 @@ path = "src/lib.rs"
 anyhow = "1"
 blake3 = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 encoding_rs = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

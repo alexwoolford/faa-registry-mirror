@@ -21,6 +21,7 @@ pub const DEFAULT_MIN_MASTER_ROWS: usize = 300_000;
 pub struct IngestOptions {
     pub db_path: std::path::PathBuf,
     pub zip_path: Option<std::path::PathBuf>,
+    pub cache_dir: Option<std::path::PathBuf>,
     pub zip_url: String,
     pub min_master_rows: usize,
     pub force: bool,
@@ -32,6 +33,7 @@ impl Default for IngestOptions {
         Self {
             db_path: std::path::PathBuf::from("data/faa-registry.sqlite"),
             zip_path: None,
+            cache_dir: None,
             zip_url: DEFAULT_ZIP_URL.to_string(),
             min_master_rows: DEFAULT_MIN_MASTER_ROWS,
             force: false,
@@ -71,6 +73,13 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
             opts.zip_url.clone(),
         )
     };
+    if opts.zip_path.is_none() {
+        if let Some(dir) = &opts.cache_dir {
+            if let Err(error) = download::write_zip_cache(dir, &zip_bytes) {
+                tracing::warn!(error = %error, cache = %dir.display(), "failed to write zip cache");
+            }
+        }
+    }
     let zip_hash = download::zip_hash(&zip_bytes);
     let as_of = utc_date();
     require_utc_date(&as_of, "as_of_date")?;

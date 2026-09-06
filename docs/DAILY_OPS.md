@@ -2,7 +2,7 @@
 
 ## Product
 
-Third independent service on this host. Downloads the FAA Releasable Aircraft zip and stores MASTER / ACFTREF / ENGINE / DEREG / DOCINDEX with SCD2 ownership history.
+Third independent service on this host. Downloads the FAA Releasable Aircraft zip and stores MASTER / ACFTREF / ENGINE / DEREG / DOCINDEX / DEALER / RESERVED. Ownership and deregistration use SCD2; DEALER and RESERVED are full-replaced each run.
 
 It is **not** registrant → ticker (that is tail-to-ticker) and **not** ADS-B trips (adsb-trip-journal). Dual FAA GETs with the producer are acceptable. This service does not import OpenSky or SEC credentials.
 
@@ -26,6 +26,7 @@ Do **not** use Docker. Do **not** run production from `$HOME` or cron.
 | Binary / scripts | `/opt/faa-registry-mirror` (root:root) |
 | Env | `/opt/faa-registry-mirror/etc/faa-registry-mirror.env` mode 600, `root:faa` |
 | Work sqlite | `/var/lib/faa-registry-mirror/work/faa-registry.sqlite` |
+| Zip cache | `/var/lib/faa-registry-mirror/cache/ReleasableAircraft.zip` (written after each origin GET; `--zip` reruns) |
 | Published sqlite | `/var/lib/faa-registry-mirror/current/faa-registry.sqlite` mode 644 |
 
 Failed or in-progress ingest leaves `current/` untouched. Publish is `VACUUM INTO` + `mv`.

@@ -136,6 +136,7 @@ fn run_ingest(db: &Path, zip: &Path, bytes: &[u8], force: bool) -> faa_registry_
     ingest(&IngestOptions {
         db_path: db.to_path_buf(),
         zip_path: Some(zip.to_path_buf()),
+        cache_dir: None,
         zip_url: String::new(),
         min_master_rows: 1,
         force,
