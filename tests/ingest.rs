@@ -157,6 +157,8 @@ fn ingest_lookup_history_search_and_status() {
     assert_eq!(stats.changed_rows, 0);
     assert_eq!(stats.documents_inserted, 1);
     assert_eq!(stats.dereg_new, 1);
+    assert_eq!(stats.dereg_changed, 0);
+    assert_eq!(stats.dereg_closed, 0);
     assert_eq!(stats.dealer_rows, 1);
     assert_eq!(stats.reserved_rows, 1);
 
@@ -259,6 +261,9 @@ fn ingest_lookup_history_search_and_status() {
     let status = query::latest_status(&conn).unwrap().expect("status");
     assert_eq!(status.status, "ok");
     assert_eq!(status.changed_rows, Some(1));
+    assert_eq!(status.dereg_new, Some(0));
+    assert_eq!(status.dereg_changed, Some(0));
+    assert_eq!(status.dereg_closed, Some(0));
     assert_eq!(status.dealer_rows, Some(1));
     assert_eq!(status.reserved_rows, Some(1));
 

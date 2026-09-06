@@ -95,6 +95,8 @@ pub struct IngestStatus {
     pub unchanged_rows: Option<i64>,
     pub skipped_rows: Option<i64>,
     pub dereg_new: Option<i64>,
+    pub dereg_changed: Option<i64>,
+    pub dereg_closed: Option<i64>,
     pub documents_inserted: Option<i64>,
     pub dealer_rows: Option<i64>,
     pub reserved_rows: Option<i64>,
@@ -329,7 +331,8 @@ pub fn latest_status(conn: &Connection) -> Result<Option<IngestStatus>> {
     let mut stmt = conn.prepare(
         "SELECT id, as_of_date, started_at, finished_at, source, zip_hash, master_rows, new_rows,
                 changed_rows, closed_rows, unchanged_rows, skipped_rows, dereg_new,
-                documents_inserted, dealer_rows, reserved_rows, status, error
+                dereg_changed, dereg_closed, documents_inserted, dealer_rows, reserved_rows,
+                status, error
          FROM ingest_runs
          ORDER BY id DESC
          LIMIT 1",
@@ -349,11 +352,13 @@ pub fn latest_status(conn: &Connection) -> Result<Option<IngestStatus>> {
             unchanged_rows: row.get(10)?,
             skipped_rows: row.get(11)?,
             dereg_new: row.get(12)?,
-            documents_inserted: row.get(13)?,
-            dealer_rows: row.get(14)?,
-            reserved_rows: row.get(15)?,
-            status: row.get(16)?,
-            error: row.get(17)?,
+            dereg_changed: row.get(13)?,
+            dereg_closed: row.get(14)?,
+            documents_inserted: row.get(15)?,
+            dealer_rows: row.get(16)?,
+            reserved_rows: row.get(17)?,
+            status: row.get(18)?,
+            error: row.get(19)?,
         })
     })?;
     match rows.next() {
@@ -475,7 +480,7 @@ pub fn format_owner_hits(hits: &[OwnerHit]) -> String {
 
 pub fn format_status(status: &IngestStatus) -> String {
     format!(
-        "Ingest #{}\n  status:     {}\n  as_of:      {}\n  started:    {}\n  finished:   {}\n  source:     {}\n  zip hash:   {}\n  master:     {}\n  new/changed/closed/unchanged: {} / {} / {} / {}\n  skipped:    {}\n  dereg new:  {}\n  documents:  {}\n  dealers:    {}\n  reserved:   {}\n  error:      {}\n",
+        "Ingest #{}\n  status:     {}\n  as_of:      {}\n  started:    {}\n  finished:   {}\n  source:     {}\n  zip hash:   {}\n  master:     {}\n  new/changed/closed/unchanged: {} / {} / {} / {}\n  skipped:    {}\n  dereg new/changed/closed: {} / {} / {}\n  documents:  {}\n  dealers:    {}\n  reserved:   {}\n  error:      {}\n",
         status.id,
         status.status,
         status.as_of_date.as_deref().unwrap_or("-"),
@@ -490,6 +495,8 @@ pub fn format_status(status: &IngestStatus) -> String {
         fmt_opt(status.unchanged_rows),
         fmt_opt(status.skipped_rows),
         fmt_opt(status.dereg_new),
+        fmt_opt(status.dereg_changed),
+        fmt_opt(status.dereg_closed),
         fmt_opt(status.documents_inserted),
         fmt_opt(status.dealer_rows),
         fmt_opt(status.reserved_rows),

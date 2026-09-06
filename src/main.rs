@@ -97,12 +97,15 @@ fn main() -> Result<()> {
                 );
             } else {
                 println!(
-                    "ingest ok  master={}  new={}  changed={}  closed={}  unchanged={}  docs={}  dealers={}  reserved={}  skipped={}",
+                    "ingest ok  master={}  new={}  changed={}  closed={}  unchanged={}  dereg_new={}  dereg_changed={}  dereg_closed={}  docs={}  dealers={}  reserved={}  skipped={}",
                     stats.master_rows,
                     stats.new_rows,
                     stats.changed_rows,
                     stats.closed_rows,
                     stats.unchanged_rows,
+                    stats.dereg_new,
+                    stats.dereg_changed,
+                    stats.dereg_closed,
                     stats.documents_inserted,
                     stats.dealer_rows,
                     stats.reserved_rows,
