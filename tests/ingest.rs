@@ -74,6 +74,30 @@ fn docindex_line() -> Vec<u8> {
     buf
 }
 
+fn dealer_line() -> Vec<u8> {
+    let mut buf = padded_record(1465);
+    write_field(&mut buf, 1, "26-0001");
+    write_field(&mut buf, 9, "7");
+    write_field(&mut buf, 11, "20230101");
+    write_field(&mut buf, 20, "20251231");
+    write_field(&mut buf, 36, "CESSNA AIRCRAFT CO");
+    write_field(&mut buf, 155, "WICHITA");
+    write_field(&mut buf, 174, "KS");
+    buf
+}
+
+fn reserved_line() -> Vec<u8> {
+    let mut buf = padded_record(194);
+    write_field(&mut buf, 1, "1WM");
+    write_field(&mut buf, 7, "META PLATFORMS INC");
+    write_field(&mut buf, 126, "MENLO PARK");
+    write_field(&mut buf, 145, "CA");
+    write_field(&mut buf, 159, "20240115");
+    write_field(&mut buf, 168, "FP");
+    write_field(&mut buf, 186, "20270305");
+    buf
+}
+
 fn join_lines(lines: &[Vec<u8>]) -> Vec<u8> {
     let mut out = Vec::new();
     for line in lines {
@@ -90,6 +114,8 @@ fn build_zip(master_lines: &[Vec<u8>]) -> Vec<u8> {
         ("ENGINE.txt", &join_lines(&[engine_line()])),
         ("DEREG.txt", &join_lines(&[dereg_line()])),
         ("DOCINDEX.txt", &join_lines(&[docindex_line()])),
+        ("DEALER.txt", &join_lines(&[dealer_line()])),
+        ("RESERVED.txt", &join_lines(&[reserved_line()])),
     ])
     .expect("zip")
 }
@@ -130,6 +156,8 @@ fn ingest_lookup_history_search_and_status() {
     assert_eq!(stats.changed_rows, 0);
     assert_eq!(stats.documents_inserted, 1);
     assert_eq!(stats.dereg_new, 1);
+    assert_eq!(stats.dealer_rows, 1);
+    assert_eq!(stats.reserved_rows, 1);
 
     let conn = faa_registry_mirror::db::open(&db).unwrap();
     let looked = query::lookup(&conn, "N12345").unwrap();
@@ -148,6 +176,17 @@ fn ingest_lookup_history_search_and_status() {
     assert_eq!(looked.documents.len(), 1);
     assert_eq!(looked.documents[0].doc_type, "SECURITY");
     assert_eq!(looked.documents[0].receipt_date, "2024-06-01");
+
+    let (dealer_name, reserved_n, reserved_who): (String, String, String) = conn
+        .query_row(
+            "SELECT d.name, r.n_number, r.registrant FROM dealers d, reserved r",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(dealer_name, "CESSNA AIRCRAFT CO");
+    assert_eq!(reserved_n, "N1WM");
+    assert_eq!(reserved_who, "META PLATFORMS INC");
 
     let dereg = query::lookup(&conn, "55555").unwrap();
     assert_eq!(dereg.deregistered[0].cancel_date, "2024-01-15");
@@ -219,6 +258,8 @@ fn ingest_lookup_history_search_and_status() {
     let status = query::latest_status(&conn).unwrap().expect("status");
     assert_eq!(status.status, "ok");
     assert_eq!(status.changed_rows, Some(1));
+    assert_eq!(status.dealer_rows, Some(1));
+    assert_eq!(status.reserved_rows, Some(1));
 
     let dropped = build_zip(&[master_line("12345", "NEW OWNER LLC", "SN1", "CO")]);
     let closed = run_ingest(&db, &zip, &dropped, false);
@@ -240,6 +281,8 @@ fn refuses_truncated_master() {
         ("ENGINE.txt", b""),
         ("DEREG.txt", b""),
         ("DOCINDEX.txt", b""),
+        ("DEALER.txt", b""),
+        ("RESERVED.txt", b""),
     ])
     .unwrap();
     std::fs::write(&zip, bytes).unwrap();

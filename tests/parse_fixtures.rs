@@ -1,4 +1,7 @@
-use faa_registry_mirror::parse::{parse_acftref, parse_dereg, parse_docindex, parse_engine, parse_master};
+use faa_registry_mirror::parse::{
+    parse_acftref, parse_dealer, parse_dereg, parse_docindex, parse_engine, parse_master,
+    parse_reserved,
+};
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,6 +36,21 @@ fn fixture_refs_and_dereg_and_docs() {
     assert_eq!(docs.records[0].n_number, "N12345");
     assert_eq!(docs.records[0].party_name, "BANK, N.A.");
     assert_eq!(docs.records[0].doc_type, "SECURITY");
+
+    let reserved = parse_reserved(&fixture("RESERVED.txt"));
+    assert!(reserved.errors.is_empty());
+    assert_eq!(reserved.records[0].n_number, "N1WM");
+    assert_eq!(reserved.records[0].registrant, "META PLATFORMS INC");
+    assert_eq!(reserved.records[0].reserve_date, "2024-01-15");
+    assert_eq!(reserved.records[0].n_number_for_change, "N99ABC");
+    assert_eq!(reserved.records[0].purge_date, "2027-03-05");
+
+    let dealer = parse_dealer(&fixture("DEALER.txt"));
+    assert!(dealer.errors.is_empty());
+    assert_eq!(dealer.records[0].certificate_number, "26-0001");
+    assert_eq!(dealer.records[0].name, "CESSNA AIRCRAFT CO");
+    assert_eq!(dealer.records[0].other_names, "TEXTRON AVIATION");
+    assert_eq!(dealer.records[0].certificate_issue_date, "2023-01-01");
 }
 
 #[test]

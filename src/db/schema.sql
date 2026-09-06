@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     dereg_changed INTEGER,
     dereg_closed INTEGER,
     documents_inserted INTEGER,
+    dealer_rows INTEGER,
+    reserved_rows INTEGER,
     status TEXT NOT NULL,
     error TEXT
 );
@@ -179,6 +181,45 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_n_number ON documents(n_number);
+
+CREATE TABLE IF NOT EXISTS reserved (
+    n_number TEXT PRIMARY KEY,
+    registrant TEXT NOT NULL,
+    street TEXT NOT NULL,
+    street2 TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    zip_code TEXT NOT NULL,
+    reserve_date TEXT NOT NULL,
+    type_reservation TEXT NOT NULL,
+    expiration_notice_date TEXT NOT NULL,
+    n_number_for_change TEXT NOT NULL,
+    purge_date TEXT NOT NULL,
+    ingest_id INTEGER NOT NULL,
+    FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reserved_registrant ON reserved(registrant);
+
+CREATE TABLE IF NOT EXISTS dealers (
+    certificate_number TEXT PRIMARY KEY,
+    ownership TEXT NOT NULL,
+    certificate_issue_date TEXT NOT NULL,
+    expiration_date TEXT NOT NULL,
+    expiration_flag TEXT NOT NULL,
+    cumulative_issue_count TEXT NOT NULL,
+    name TEXT NOT NULL,
+    street TEXT NOT NULL,
+    street2 TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    zip_code TEXT NOT NULL,
+    other_names TEXT NOT NULL,
+    ingest_id INTEGER NOT NULL,
+    FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dealers_name ON dealers(name);
 
 -- External-content FTS: no aircraft_fts_content / c0–c3 shadow table.
 -- Query this virtual table (or JOIN aircraft ON aircraft.id = aircraft_fts.rowid).

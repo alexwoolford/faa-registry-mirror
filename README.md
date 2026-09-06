@@ -45,8 +45,8 @@ cargo run --release -- status
 | `ENGINE.txt` | `engine_ref` | Full replace (code dictionary) |
 | `DEREG.txt` | `deregistered` | SCD Type 2 |
 | `DOCINDEX.txt` | `documents` | Append-only unique rows (accumulates the FAA’s ~180-day window) |
-
-`DEALER.txt` and reserved N-numbers are out of scope.
+| `DEALER.txt` | `dealers` | Full replace (dealer certificate roster) |
+| `RESERVED.txt` | `reserved` | Full replace (current N-number reservations) |
 
 ## Identifiers
 

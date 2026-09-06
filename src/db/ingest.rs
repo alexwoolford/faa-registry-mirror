@@ -5,11 +5,15 @@ use rusqlite::{params, Connection, Transaction};
 
 use crate::download::{self, DEFAULT_ZIP_URL};
 use crate::model::{
-    AircraftRef, DeregRecord, DocumentRecord, EngineRef, MasterRecord, ParseError,
+    AircraftRef, DealerRecord, DeregRecord, DocumentRecord, EngineRef, MasterRecord, ParseError,
+    ReservedRecord,
 };
 use crate::canonical_icao24;
 use crate::dates::{require_utc_date, require_utc_instant, utc_date, utc_iso};
-use crate::parse::{parse_acftref, parse_dereg, parse_docindex, parse_engine, parse_master};
+use crate::parse::{
+    parse_acftref, parse_dealer, parse_dereg, parse_docindex, parse_engine, parse_master,
+    parse_reserved,
+};
 
 pub const DEFAULT_MIN_MASTER_ROWS: usize = 300_000;
 
@@ -50,6 +54,8 @@ pub struct IngestStats {
     pub dereg_changed: usize,
     pub dereg_closed: usize,
     pub documents_inserted: usize,
+    pub dealer_rows: usize,
+    pub reserved_rows: usize,
     pub skipped_same_zip: bool,
 }
 
@@ -92,12 +98,16 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     let engine_bytes = download::extract_named(&zip_bytes, "ENGINE.txt")?;
     let dereg_bytes = download::extract_named(&zip_bytes, "DEREG.txt")?;
     let docindex_bytes = download::extract_named(&zip_bytes, "DOCINDEX.txt")?;
+    let dealer_bytes = download::extract_named(&zip_bytes, "DEALER.txt")?;
+    let reserved_bytes = download::extract_named(&zip_bytes, "RESERVED.txt")?;
 
     let master = parse_master(&master_bytes);
     let acftref = parse_acftref(&acftref_bytes);
     let engine = parse_engine(&engine_bytes);
     let dereg = parse_dereg(&dereg_bytes);
     let documents = parse_docindex(&docindex_bytes);
+    let dealers = parse_dealer(&dealer_bytes);
+    let reserved = parse_reserved(&reserved_bytes);
 
     let mut parse_errors = Vec::new();
     parse_errors.extend(master.errors);
@@ -105,6 +115,8 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     parse_errors.extend(engine.errors);
     parse_errors.extend(dereg.errors);
     parse_errors.extend(documents.errors);
+    parse_errors.extend(dealers.errors);
+    parse_errors.extend(reserved.errors);
 
     if master.records.len() < opts.min_master_rows {
         record_failed_run(
@@ -133,12 +145,16 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
 
     replace_aircraft_ref(&tx, &acftref.records)?;
     replace_engine_ref(&tx, &engine.records)?;
+    replace_dealers(&tx, ingest_id, &dealers.records)?;
+    replace_reserved(&tx, ingest_id, &reserved.records)?;
 
     let mut stats = IngestStats {
         source: source.clone(),
         zip_hash: zip_hash.clone(),
         master_rows: master.records.len(),
         skipped_rows: parse_errors.len(),
+        dealer_rows: dealers.records.len(),
+        reserved_rows: reserved.records.len(),
         ..IngestStats::default()
     };
 
@@ -157,6 +173,8 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
         closed = stats.closed_rows,
         unchanged = stats.unchanged_rows,
         docs = stats.documents_inserted,
+        dealers = stats.dealer_rows,
+        reserved = stats.reserved_rows,
         "ingest complete"
     );
     Ok(stats)
@@ -254,8 +272,10 @@ fn finish_run(tx: &Transaction<'_>, ingest_id: i64, stats: &IngestStats) -> Resu
             dereg_changed = ?9,
             dereg_closed = ?10,
             documents_inserted = ?11,
+            dealer_rows = ?12,
+            reserved_rows = ?13,
             status = 'ok'
-         WHERE id = ?12",
+         WHERE id = ?14",
         params![
             {
                 let finished = utc_iso(chrono::Utc::now());
@@ -272,6 +292,8 @@ fn finish_run(tx: &Transaction<'_>, ingest_id: i64, stats: &IngestStats) -> Resu
             stats.dereg_changed as i64,
             stats.dereg_closed as i64,
             stats.documents_inserted as i64,
+            stats.dealer_rows as i64,
+            stats.reserved_rows as i64,
             ingest_id,
         ],
     )?;
@@ -320,6 +342,64 @@ fn replace_engine_ref(tx: &Transaction<'_>, rows: &[EngineRef]) -> Result<()> {
             row.type_engine,
             row.horsepower,
             row.thrust
+        ])?;
+    }
+    Ok(())
+}
+
+fn replace_dealers(tx: &Transaction<'_>, ingest_id: i64, rows: &[DealerRecord]) -> Result<()> {
+    tx.execute("DELETE FROM dealers", [])?;
+    let mut stmt = tx.prepare(
+        "INSERT INTO dealers (
+            certificate_number, ownership, certificate_issue_date, expiration_date,
+            expiration_flag, cumulative_issue_count, name, street, street2, city, state,
+            zip_code, other_names, ingest_id
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+    )?;
+    for row in rows {
+        stmt.execute(params![
+            row.certificate_number,
+            row.ownership,
+            row.certificate_issue_date,
+            row.expiration_date,
+            row.expiration_flag,
+            row.cumulative_issue_count,
+            row.name,
+            row.street,
+            row.street2,
+            row.city,
+            row.state,
+            row.zip_code,
+            row.other_names,
+            ingest_id,
+        ])?;
+    }
+    Ok(())
+}
+
+fn replace_reserved(tx: &Transaction<'_>, ingest_id: i64, rows: &[ReservedRecord]) -> Result<()> {
+    tx.execute("DELETE FROM reserved", [])?;
+    let mut stmt = tx.prepare(
+        "INSERT INTO reserved (
+            n_number, registrant, street, street2, city, state, zip_code, reserve_date,
+            type_reservation, expiration_notice_date, n_number_for_change, purge_date, ingest_id
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+    )?;
+    for row in rows {
+        stmt.execute(params![
+            row.n_number,
+            row.registrant,
+            row.street,
+            row.street2,
+            row.city,
+            row.state,
+            row.zip_code,
+            row.reserve_date,
+            row.type_reservation,
+            row.expiration_notice_date,
+            row.n_number_for_change,
+            row.purge_date,
+            ingest_id,
         ])?;
     }
     Ok(())

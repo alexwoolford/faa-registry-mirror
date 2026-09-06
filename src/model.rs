@@ -100,6 +100,39 @@ pub struct DeregRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservedRecord {
+    pub n_number: String,
+    pub registrant: String,
+    pub street: String,
+    pub street2: String,
+    pub city: String,
+    pub state: String,
+    pub zip_code: String,
+    pub reserve_date: String,
+    pub type_reservation: String,
+    pub expiration_notice_date: String,
+    pub n_number_for_change: String,
+    pub purge_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DealerRecord {
+    pub certificate_number: String,
+    pub ownership: String,
+    pub certificate_issue_date: String,
+    pub expiration_date: String,
+    pub expiration_flag: String,
+    pub cumulative_issue_count: String,
+    pub name: String,
+    pub street: String,
+    pub street2: String,
+    pub city: String,
+    pub state: String,
+    pub zip_code: String,
+    pub other_names: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentRecord {
     pub type_collateral: String,
     pub collateral: String,
