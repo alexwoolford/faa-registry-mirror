@@ -1,0 +1,12 @@
+[Unit]
+Description=FAA registry mirror daily ingest
+Documentation=file:///opt/faa-registry-mirror/docs/DAILY_OPS.md
+
+[Timer]
+OnCalendar=*-*-* 05:45:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=faa-registry-mirror-ingest.service
+
+[Install]
+WantedBy=timers.target

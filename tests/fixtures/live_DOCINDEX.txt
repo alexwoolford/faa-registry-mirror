@@ -1,0 +1,3 @@
+TYPE-COLLATERAL,COLLATERAL,PARTY,DOC-ID,DRDATE,PROCESSING-DATE,CORR-DATE,CORR-ID,SERIAL-ID,DOC-TYPE,
+1,1006W                                ,                                                  ,ARE017980731,20260804,20260804,        , ,24-1069                       ,BOS,
+1,1006W                                ,                                                  ,ARE017980733,20260804,20260804,        , ,24-1069                       ,S/A,

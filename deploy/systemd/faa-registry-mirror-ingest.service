@@ -1,0 +1,21 @@
+[Unit]
+Description=FAA registry mirror daily ingest
+Documentation=file:///opt/faa-registry-mirror/docs/DAILY_OPS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=faa
+Group=faa
+Nice=10
+EnvironmentFile=-/opt/faa-registry-mirror/etc/faa-registry-mirror.env
+WorkingDirectory=/opt/faa-registry-mirror
+ExecStart=/opt/faa-registry-mirror/scripts/run-ingest.sh
+TimeoutStartSec=2h
+SyslogIdentifier=faa-registry-mirror-ingest
+ReadWritePaths=/var/lib/faa-registry-mirror
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

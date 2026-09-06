@@ -1,0 +1,141 @@
+use std::io::{Cursor, Read, Write};
+use std::path::Path;
+use std::time::Duration;
+
+use anyhow::{anyhow, Context, Result};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, SERVER};
+use zip::ZipArchive;
+
+pub const DEFAULT_ZIP_URL: &str = "https://registry.faa.gov/database/ReleasableAircraft.zip";
+
+/// Origin-accepted User-Agent for `registry.faa.gov`.
+///
+/// Akamai returns 403 AkamaiGHost for the GitHub-style crate UA. Do not send
+/// this string to `www.sec.gov`. Override with `FAA_USER_AGENT`.
+pub const FAA_DOWNLOAD_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+
+const GET_ATTEMPTS: u32 = 4;
+
+pub fn resolve_user_agent(cli: Option<&str>) -> String {
+    if let Some(ua) = cli.map(str::trim).filter(|s| !s.is_empty()) {
+        return ua.to_string();
+    }
+    std::env::var("FAA_USER_AGENT")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FAA_DOWNLOAD_USER_AGENT.to_string())
+}
+
+fn default_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("en-US,en;q=0.9"),
+    );
+    headers
+}
+
+fn server_name(resp: &reqwest::blocking::Response) -> String {
+    resp.headers()
+        .get(SERVER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+pub fn download_zip(url: &str, user_agent: &str) -> Result<Vec<u8>> {
+    tracing::info!(url, "downloading FAA registry zip");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .user_agent(user_agent)
+        .gzip(true)
+        .default_headers(default_headers())
+        .build()
+        .context("build HTTP client")?;
+
+    let mut delay = Duration::from_secs(2);
+    let mut last: Option<(reqwest::StatusCode, String)> = None;
+    for attempt in 1..=GET_ATTEMPTS {
+        let resp = client
+            .get(url)
+            .send()
+            .with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        let server = server_name(&resp);
+        if status.as_u16() == 503 && attempt < GET_ATTEMPTS {
+            tracing::warn!(attempt, %status, server = %server, url, "origin 503; retrying");
+            std::thread::sleep(delay);
+            delay *= 2;
+            last = Some((status, server));
+            continue;
+        }
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status} for {url} (Server: {server})");
+        }
+        let bytes = resp.bytes().context("read zip body")?;
+        tracing::info!(bytes = bytes.len(), "download complete");
+        return Ok(bytes.to_vec());
+    }
+    let (status, server) = last.expect("503 retry always records status");
+    anyhow::bail!("HTTP {status} for {url} (Server: {server}) after {GET_ATTEMPTS} attempts")
+}
+
+pub fn read_zip_file(path: &Path) -> Result<Vec<u8>> {
+    std::fs::read(path).with_context(|| format!("read {}", path.display()))
+}
+
+pub fn extract_named(zip_bytes: &[u8], filename: &str) -> Result<Vec<u8>> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(zip_bytes)).context("open zip archive")?;
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).context("read zip entry")?;
+        let name = file.name().replace('\\', "/");
+        let base = name.rsplit('/').next().unwrap_or(name.as_str());
+        if base.eq_ignore_ascii_case(filename) {
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .with_context(|| format!("extract {filename}"))?;
+            return Ok(buf);
+        }
+    }
+    Err(anyhow!("{filename} not found in zip"))
+}
+
+pub fn zip_hash(zip_bytes: &[u8]) -> String {
+    blake3::hash(zip_bytes).to_hex().to_string()
+}
+
+pub fn write_test_zip(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, data) in files {
+            zip.start_file(*name, options)?;
+            zip.write_all(data)?;
+        }
+        zip.finish()?;
+    }
+    Ok(cursor.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_by_basename_case_insensitive() {
+        let zip = write_test_zip(&[("folder/MASTER.txt", b"hello")]).unwrap();
+        let extracted = extract_named(&zip, "master.txt").unwrap();
+        assert_eq!(extracted, b"hello");
+    }
+
+    #[test]
+    fn resolve_user_agent_prefers_cli() {
+        assert_eq!(resolve_user_agent(Some("CustomUA/1")), "CustomUA/1");
+        assert_eq!(resolve_user_agent(Some("")), FAA_DOWNLOAD_USER_AGENT);
+    }
+}
