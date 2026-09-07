@@ -86,11 +86,12 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     let started_at = utc_iso(chrono::Utc::now());
     require_utc_instant(&started_at, "started_at")?;
 
-    let mut conn = crate::db::open(&opts.db_path)?;
+    let mut work = crate::db::open_work(&opts.db_path)?;
     if !opts.force {
-        if let Some(prev) = last_ok_zip_hash(&conn)? {
+        if let Some(prev) = last_ok_zip_hash(&work)? {
             if prev == zip_hash {
-                record_skipped_run(&conn, &as_of, &started_at, &source, &zip_hash)?;
+                record_skipped_run(&work, &as_of, &started_at, &source, &zip_hash)?;
+                work.nudge.send();
                 tracing::info!(zip_hash = %zip_hash, "same zip_hash as last ok run; skipping SCD");
                 return Ok(IngestStats {
                     source,
@@ -129,7 +130,7 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
 
     if master.records.len() < opts.min_master_rows {
         record_failed_run(
-            &conn,
+            &work,
             &as_of,
             &started_at,
             &source,
@@ -142,6 +143,7 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
                 opts.min_master_rows
             ),
         )?;
+        work.nudge.send();
         bail!(
             "MASTER.txt has {} data rows; expected at least {} (truncated dump?)",
             master.records.len(),
@@ -149,7 +151,7 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
         );
     }
 
-    let tx = conn.transaction().context("begin ingest transaction")?;
+    let tx = work.transaction().context("begin ingest transaction")?;
     let ingest_id = insert_run_start(&tx, &as_of, &started_at, &source, &zip_hash)?;
 
     replace_aircraft_ref(&tx, &acftref.records)?;
@@ -174,6 +176,7 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     rebuild_fts(&tx)?;
     finish_run(&tx, ingest_id, &stats)?;
     tx.commit().context("commit ingest")?;
+    work.nudge.send();
 
     tracing::info!(
         master = stats.master_rows,
@@ -643,11 +646,12 @@ fn insert_documents(
     let now = utc_iso(chrono::Utc::now());
     require_utc_instant(&now, "first_seen")?;
     let mut stmt = tx.prepare(
-        "INSERT OR IGNORE INTO documents (
+        "INSERT INTO documents (
             type_collateral, collateral, n_number, party_name, document_id, receipt_date,
             processing_date, correction_date, correction_id, serial_id, doc_type,
             first_seen, ingest_id
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+         ON CONFLICT DO NOTHING",
     )?;
     let mut inserted = 0;
     for rec in records {
@@ -693,18 +697,5 @@ fn insert_parse_errors(
 }
 
 fn rebuild_fts(tx: &Transaction<'_>) -> Result<()> {
-    tx.execute_batch(
-        "DROP TABLE IF EXISTS aircraft_fts;
-         CREATE VIRTUAL TABLE aircraft_fts USING fts5(
-            n_number UNINDEXED,
-            owner_name,
-            city,
-            state,
-            content='aircraft',
-            content_rowid='id'
-         );
-         INSERT INTO aircraft_fts (rowid, n_number, owner_name, city, state)
-         SELECT id, n_number, owner_name, city, state FROM aircraft WHERE is_current = 1;",
-    )?;
-    Ok(())
+    crate::db::rebuild_aircraft_fts(tx)
 }

@@ -61,6 +61,10 @@ enum Command {
     },
     /// Show the most recent ingest run
     Status,
+    /// Consistent snapshot via VACUUM INTO (bundled SQLite; host sqlite3 3.34 cannot open STRICT)
+    VacuumInto {
+        dest: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -129,6 +133,9 @@ fn main() -> Result<()> {
                 Some(status) => print!("{}", query::format_status(&status)),
                 None => println!("No ingest runs yet."),
             }
+        }
+        Command::VacuumInto { dest } => {
+            faa_registry_mirror::db::vacuum_into(&cli.db, &dest)?;
         }
     }
     Ok(())

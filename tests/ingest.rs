@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use faa_registry_mirror::db::ingest::{ingest, IngestOptions};
 use faa_registry_mirror::db::query;
@@ -121,10 +122,12 @@ fn build_zip(master_lines: &[Vec<u8>]) -> Vec<u8> {
 }
 
 fn temp_paths(label: &str) -> (PathBuf, PathBuf) {
+    static N: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "faa-registry-{}-{}",
+        "faa-registry-{}-{}-{}",
         label,
-        std::process::id()
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

@@ -1,4 +1,9 @@
-CREATE TABLE IF NOT EXISTS ingest_runs (
+-- Recreate real tables as STRICT. FTS must drop first (content='aircraft').
+-- ingest_runs uses a named INSERT because ALTER added dealer_rows/reserved_rows
+-- after status/error on older files.
+DROP TABLE IF EXISTS aircraft_fts;
+
+CREATE TABLE ingest_runs_new (
     id INTEGER PRIMARY KEY,
     as_of_date TEXT NOT NULL,
     started_at TEXT NOT NULL,
@@ -20,8 +25,20 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     status TEXT NOT NULL CHECK (status IN ('running', 'ok', 'failed', 'skipped')),
     error TEXT
 ) STRICT;
+INSERT INTO ingest_runs_new (
+    id, as_of_date, started_at, finished_at, source, zip_hash,
+    master_rows, new_rows, changed_rows, closed_rows, unchanged_rows, skipped_rows,
+    dereg_new, dereg_changed, dereg_closed, documents_inserted,
+    dealer_rows, reserved_rows, status, error
+)
+SELECT
+    id, as_of_date, started_at, finished_at, source, zip_hash,
+    master_rows, new_rows, changed_rows, closed_rows, unchanged_rows, skipped_rows,
+    dereg_new, dereg_changed, dereg_closed, documents_inserted,
+    dealer_rows, reserved_rows, status, error
+FROM ingest_runs;
 
-CREATE TABLE IF NOT EXISTS parse_errors (
+CREATE TABLE parse_errors_new (
     id INTEGER PRIMARY KEY,
     ingest_id INTEGER NOT NULL,
     file_name TEXT NOT NULL,
@@ -30,8 +47,9 @@ CREATE TABLE IF NOT EXISTS parse_errors (
     error TEXT NOT NULL,
     FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
 ) STRICT;
+INSERT INTO parse_errors_new SELECT * FROM parse_errors;
 
-CREATE TABLE IF NOT EXISTS aircraft_ref (
+CREATE TABLE aircraft_ref_new (
     code TEXT PRIMARY KEY,
     mfr TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -46,8 +64,9 @@ CREATE TABLE IF NOT EXISTS aircraft_ref (
     tc_data_sheet TEXT NOT NULL,
     tc_data_holder TEXT NOT NULL
 ) STRICT;
+INSERT INTO aircraft_ref_new SELECT * FROM aircraft_ref;
 
-CREATE TABLE IF NOT EXISTS engine_ref (
+CREATE TABLE engine_ref_new (
     code TEXT PRIMARY KEY,
     mfr TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -55,8 +74,9 @@ CREATE TABLE IF NOT EXISTS engine_ref (
     horsepower TEXT NOT NULL,
     thrust TEXT NOT NULL
 ) STRICT;
+INSERT INTO engine_ref_new SELECT * FROM engine_ref;
 
-CREATE TABLE IF NOT EXISTS aircraft (
+CREATE TABLE aircraft_new (
     id INTEGER PRIMARY KEY,
     n_number TEXT NOT NULL,
     serial_number TEXT NOT NULL,
@@ -96,14 +116,9 @@ CREATE TABLE IF NOT EXISTS aircraft (
     ingest_id INTEGER NOT NULL,
     FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
 ) STRICT;
+INSERT INTO aircraft_new SELECT * FROM aircraft;
 
-CREATE INDEX IF NOT EXISTS idx_aircraft_n_number ON aircraft(n_number);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_aircraft_current
-    ON aircraft(n_number) WHERE is_current = 1;
-CREATE INDEX IF NOT EXISTS idx_aircraft_owner ON aircraft(owner_name);
-CREATE INDEX IF NOT EXISTS idx_aircraft_icao24 ON aircraft(icao24);
-
-CREATE TABLE IF NOT EXISTS deregistered (
+CREATE TABLE deregistered_new (
     id INTEGER PRIMARY KEY,
     n_number TEXT NOT NULL,
     serial_number TEXT NOT NULL,
@@ -147,13 +162,9 @@ CREATE TABLE IF NOT EXISTS deregistered (
     ingest_id INTEGER NOT NULL,
     FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
 ) STRICT;
+INSERT INTO deregistered_new SELECT * FROM deregistered;
 
-CREATE INDEX IF NOT EXISTS idx_dereg_n_number ON deregistered(n_number);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dereg_current
-    ON deregistered(n_number) WHERE is_current = 1;
-CREATE INDEX IF NOT EXISTS idx_dereg_icao24 ON deregistered(icao24);
-
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE documents_new (
     id INTEGER PRIMARY KEY,
     type_collateral TEXT NOT NULL,
     collateral TEXT NOT NULL,
@@ -179,10 +190,9 @@ CREATE TABLE IF NOT EXISTS documents (
         doc_type
     )
 ) STRICT;
+INSERT INTO documents_new SELECT * FROM documents;
 
-CREATE INDEX IF NOT EXISTS idx_documents_n_number ON documents(n_number);
-
-CREATE TABLE IF NOT EXISTS reserved (
+CREATE TABLE reserved_new (
     n_number TEXT PRIMARY KEY,
     registrant TEXT NOT NULL,
     street TEXT NOT NULL,
@@ -198,10 +208,9 @@ CREATE TABLE IF NOT EXISTS reserved (
     ingest_id INTEGER NOT NULL,
     FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
 ) STRICT;
+INSERT INTO reserved_new SELECT * FROM reserved;
 
-CREATE INDEX IF NOT EXISTS idx_reserved_registrant ON reserved(registrant);
-
-CREATE TABLE IF NOT EXISTS dealers (
+CREATE TABLE dealers_new (
     certificate_number TEXT PRIMARY KEY,
     ownership TEXT NOT NULL,
     certificate_issue_date TEXT NOT NULL,
@@ -218,17 +227,24 @@ CREATE TABLE IF NOT EXISTS dealers (
     ingest_id INTEGER NOT NULL,
     FOREIGN KEY (ingest_id) REFERENCES ingest_runs(id)
 ) STRICT;
+INSERT INTO dealers_new SELECT * FROM dealers;
 
-CREATE INDEX IF NOT EXISTS idx_dealers_name ON dealers(name);
+DROP TABLE parse_errors;
+DROP TABLE aircraft;
+DROP TABLE deregistered;
+DROP TABLE documents;
+DROP TABLE reserved;
+DROP TABLE dealers;
+DROP TABLE ingest_runs;
+DROP TABLE aircraft_ref;
+DROP TABLE engine_ref;
 
--- External-content FTS: no aircraft_fts_content / c0–c3 shadow table.
--- Query this virtual table (or JOIN aircraft ON aircraft.id = aircraft_fts.rowid).
--- Rebuild is a full replace in ingest; CREATE here so an empty DB still has the object.
-CREATE VIRTUAL TABLE IF NOT EXISTS aircraft_fts USING fts5(
-    n_number UNINDEXED,
-    owner_name,
-    city,
-    state,
-    content='aircraft',
-    content_rowid='id'
-);
+ALTER TABLE ingest_runs_new RENAME TO ingest_runs;
+ALTER TABLE parse_errors_new RENAME TO parse_errors;
+ALTER TABLE aircraft_ref_new RENAME TO aircraft_ref;
+ALTER TABLE engine_ref_new RENAME TO engine_ref;
+ALTER TABLE aircraft_new RENAME TO aircraft;
+ALTER TABLE deregistered_new RENAME TO deregistered;
+ALTER TABLE documents_new RENAME TO documents;
+ALTER TABLE reserved_new RENAME TO reserved;
+ALTER TABLE dealers_new RENAME TO dealers;

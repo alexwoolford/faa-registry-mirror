@@ -46,11 +46,8 @@ test -s "$SRC" || {
 
 TMP="${PUBLISH}.tmp"
 rm -f "$TMP"
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  echo "sqlite3 is required to VACUUM INTO a consistent publish snapshot" >&2
-  exit 1
-fi
-sqlite3 "$SRC" "PRAGMA busy_timeout=5000; VACUUM INTO '$TMP';" >/dev/null
+# Host sqlite3 on Oracle Linux 9 is 3.34 and cannot open STRICT; use bundled SQLite.
+"$BIN" --db "$SRC" vacuum-into "$TMP"
 chmod 0644 "$TMP"
 mv -f "$TMP" "$PUBLISH"
 echo "published → $PUBLISH"

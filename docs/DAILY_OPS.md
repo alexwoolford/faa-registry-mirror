@@ -57,3 +57,23 @@ sqlite3 /var/lib/faa-registry-mirror/current/faa-registry.sqlite \
 Expect `n_number` like `N…`, `icao24` lowercase hex, `as_of_date` `YYYY-MM-DD`, instants ending in `Z`, current MASTER on the order of ~300k.
 
 Outbound HTTPS: `registry.faa.gov` only.
+
+## State capture (prep)
+
+Logical name: `faa-registry-mirror`. Watch the **work** sqlite ingest writes, not the published `current/` copy (`VACUUM INTO` / `mv` duplicates `_outbox`).
+
+| Path | Role |
+|---|---|
+| `/var/lib/faa-registry-mirror/work/faa-registry.sqlite` | Watched. `_outbox` + triggers. |
+| `/var/lib/faa-registry-mirror/current/faa-registry.sqlite` | Published snapshot. Do not watch. `open()` does not install capture. |
+
+Capture set: `ingest_runs` (after), `aircraft` / `deregistered` (full; exclude `state_hash`), `documents` (after), `parse_errors` (after; exclude `raw_line`). Ref / dealers / reserved / FTS are zip-replaced or derived and are **not** captured. SCD close is `is_current=0` (a `U`); there is no `deleted_at` on aircraft.
+
+Env (optional until the collector exists; missing socket is ignored):
+
+```
+STATE_CAPTURE_SOCK=/run/state/collect.sock
+STATE_CAPTURE_ANNOUNCE_DIR=/var/lib/state-capture/announce
+```
+
+If the announce dir cannot be created, `open_work()` writes `{sqlite_dir}/.capturable.json`.
