@@ -171,6 +171,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "capturable-state"
+version = "0.1.0"
+source = "git+https://github.com/alexwoolford/capturable-state?tag=v0.1.0#9ab92742deaf8c9e743a901667db3350789e5999"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -356,6 +367,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "capturable-state",
  "chrono",
  "clap",
  "encoding_rs",
@@ -1160,6 +1172,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

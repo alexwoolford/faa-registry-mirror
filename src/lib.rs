@@ -1,5 +1,4 @@
 pub mod dates;
-mod capture;
 pub mod db;
 pub mod download;
 pub mod model;

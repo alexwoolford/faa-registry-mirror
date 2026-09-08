@@ -8,7 +8,15 @@ It is **not** registrant → ticker (that is tail-to-ticker) and **not** ADS-B t
 
 Join-friendly identifiers: `n_number` with a leading `N`, lowercase `icao24`. Dates are `YYYY-MM-DD`; write instants are `YYYY-MM-DDTHH:MM:SSZ`.
 
-Do **not** use Docker. Do **not** run production from `$HOME` or cron.
+Do **not** use Docker. Do **not** run production from `$HOME` or cron. **The systemd timer is the scheduler.**
+
+## Scheduler and telemetry
+
+`faa-registry-mirror-ingest.timer` starts a `Type=oneshot` service. Do not add an in-process cron.
+
+Operator logs: `tracing` on stderr → journald (`SyslogIdentifier=faa-registry-mirror-ingest`). Default `RUST_LOG=info`.
+
+`ingest_runs` is capturable domain telemetry (status, row counts, timestamps). Query it in mosaic; do not scrape Prometheus from this oneshot.
 
 ## Cadence
 
@@ -69,7 +77,9 @@ Logical name: `faa-registry-mirror`. Watch the **work** sqlite ingest writes, no
 
 Capture set: `ingest_runs` (after), `aircraft` / `deregistered` (full; exclude `state_hash`), `documents` (after), `parse_errors` (after; exclude `raw_line`). Ref / dealers / reserved / FTS are zip-replaced or derived and are **not** captured. SCD close is `is_current=0` (a `U`); there is no `deleted_at` on aircraft.
 
-Env (optional until the collector exists; missing socket is ignored):
+Outbox/triggers come from [`capturable-state`](https://github.com/alexwoolford/capturable-state) `v0.1.0`, not a copied `capture.rs`.
+
+Env (collector is `state-capture` on this host; missing socket is ignored):
 
 ```
 STATE_CAPTURE_SOCK=/run/state/collect.sock

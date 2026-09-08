@@ -5,6 +5,7 @@ edition = "2021"
 rust-version = "1.80"
 description = "Download, parse, and historically track FAA aircraft ownership in SQLite"
 license = "MIT"
+repository = "https://github.com/alexwoolford/faa-registry-mirror"
 
 [[bin]]
 name = "faa-registry-mirror"
@@ -17,6 +18,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1"
 blake3 = "1"
+capturable-state = { git = "https://github.com/alexwoolford/capturable-state", tag = "v0.1.0" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
 encoding_rs = "0.8"

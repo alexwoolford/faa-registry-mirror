@@ -5,6 +5,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use capturable_state::{
+    apply_runtime_pragmas, install, table_is_strict, CaptureConfig, CaptureMode, Nudge, TableSpec,
+};
 use rusqlite::Connection;
 
 /// Published `current/` and read-only lookup/status. Does not migrate STRICT
@@ -32,7 +35,7 @@ pub fn open(path: &Path) -> Result<Connection> {
 /// Writable work sqlite: STRICT migrate **before** capture triggers, then `_outbox`.
 pub struct WorkDb {
     conn: Connection,
-    pub nudge: crate::capture::Nudge,
+    pub nudge: Nudge,
 }
 
 impl Deref for WorkDb {
@@ -56,7 +59,7 @@ pub fn open_work(path: &Path) -> Result<WorkDb> {
         }
     }
     let conn = Connection::open(path).with_context(|| format!("open work {}", path.display()))?;
-    crate::capture::apply_runtime_pragmas(&conn)?;
+    apply_runtime_pragmas(&conn)?;
     conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.execute_batch(include_str!("schema.sql"))
         .context("apply schema")?;
@@ -94,10 +97,7 @@ pub(crate) fn rebuild_aircraft_fts(conn: &Connection) -> Result<()> {
 /// Does not apply schema or install capture. `dest` must not already exist.
 pub fn vacuum_into(src: &Path, dest: &Path) -> Result<()> {
     if dest.exists() {
-        anyhow::bail!(
-            "VACUUM INTO destination already exists: {}",
-            dest.display()
-        );
+        anyhow::bail!("VACUUM INTO destination already exists: {}", dest.display());
     }
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
@@ -122,25 +122,19 @@ const DB_NAME: &str = "faa-registry-mirror";
 const STATE_HASH: &[&str] = &["state_hash"];
 const RAW_LINE: &[&str] = &["raw_line"];
 
-fn install_capture(conn: &Connection, path: &Path) -> Result<crate::capture::Nudge> {
+fn install_capture(conn: &Connection, path: &Path) -> Result<Nudge> {
     let tables = [
-        crate::capture::TableSpec::new("ingest_runs", crate::capture::CaptureMode::After),
-        crate::capture::TableSpec::new("aircraft", crate::capture::CaptureMode::Full)
-            .exclude(STATE_HASH),
-        crate::capture::TableSpec::new("deregistered", crate::capture::CaptureMode::Full)
-            .exclude(STATE_HASH),
-        crate::capture::TableSpec::new("documents", crate::capture::CaptureMode::After),
-        crate::capture::TableSpec::new("parse_errors", crate::capture::CaptureMode::After)
-            .exclude(RAW_LINE),
+        TableSpec::new("ingest_runs", CaptureMode::After),
+        TableSpec::new("aircraft", CaptureMode::Full).exclude(STATE_HASH),
+        TableSpec::new("deregistered", CaptureMode::Full).exclude(STATE_HASH),
+        TableSpec::new("documents", CaptureMode::After),
+        TableSpec::new("parse_errors", CaptureMode::After).exclude(RAW_LINE),
     ];
-    crate::capture::install(
-        conn,
-        &crate::capture::CaptureConfig::new(DB_NAME, path, &tables),
-    )
+    install(conn, &CaptureConfig::new(DB_NAME, path, &tables))
 }
 
 fn migrate_strict(conn: &Connection) -> Result<()> {
-    if crate::capture::table_is_strict(conn, "ingest_runs")? {
+    if table_is_strict(conn, "ingest_runs")? {
         return Ok(());
     }
     conn.pragma_update(None, "foreign_keys", "OFF")?;
@@ -334,7 +328,7 @@ mod tests {
             let conn = Connection::open(&path).unwrap();
             let sql = include_str!("schema.sql").replace(") STRICT;", ");");
             conn.execute_batch(&sql).unwrap();
-            assert!(!crate::capture::table_is_strict(&conn, "ingest_runs").unwrap());
+            assert!(!table_is_strict(&conn, "ingest_runs").unwrap());
             conn.execute(
                 "INSERT INTO ingest_runs (as_of_date, started_at, source, status)
                  VALUES ('2026-09-01', '2026-09-01T00:00:00Z', 'test', 'ok')",
@@ -368,10 +362,13 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(hits, 0, "pre-migrate FTS index must be empty so rebuild is visible");
+            assert_eq!(
+                hits, 0,
+                "pre-migrate FTS index must be empty so rebuild is visible"
+            );
         }
         let db = open_work(&path).unwrap();
-        assert!(crate::capture::table_is_strict(&db, "ingest_runs").unwrap());
+        assert!(table_is_strict(&db, "ingest_runs").unwrap());
         let n_number: String = db
             .query_row(
                 "SELECT n_number FROM aircraft_fts WHERE aircraft_fts MATCH 'BANK'",
@@ -394,15 +391,14 @@ mod tests {
         vacuum_into(&src, &dest).unwrap();
         assert!(dest.exists());
         let err = vacuum_into(&src, &dest).unwrap_err();
-        assert!(
-            err.to_string().contains("already exists"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("already exists"), "{err}");
         let snap = Connection::open(&dest).unwrap();
         let n: i64 = snap
-            .query_row("SELECT COUNT(*) FROM aircraft WHERE is_current = 1", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM aircraft WHERE is_current = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 1);
         let _ = std::fs::remove_dir_all(dir);
