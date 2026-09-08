@@ -66,6 +66,16 @@ Expect `n_number` like `N…`, `icao24` lowercase hex, `as_of_date` `YYYY-MM-DD`
 
 Outbound HTTPS: `registry.faa.gov` only.
 
+## Timer failed
+
+`Persistent=true` will retry after a reboot. It will not page you.
+
+1. `systemctl is-failed faa-registry-mirror-ingest.service` and `systemctl list-timers 'faa-registry-mirror-*'`.
+2. `journalctl -u faa-registry-mirror-ingest.service -n 80 --no-pager` — HTTP 403 is Akamai/UA; confirm `FAA_USER_AGENT` / Safari default. Truncated MASTER is `status='failed'` and must not publish.
+3. Query last `ingest_runs` on **work** sqlite (`/var/lib/faa-registry-mirror/work/faa-registry.sqlite`) if host `sqlite3` understands STRICT; otherwise `run-status.sh`.
+4. Leave `current/` alone. Re-run: `sudo systemctl start faa-registry-mirror-ingest.service`.
+5. If identifiers or date shapes changed, wipe work+current sqlite and ingest again (README).
+
 ## State capture (prep)
 
 Logical name: `faa-registry-mirror`. Watch the **work** sqlite ingest writes, not the published `current/` copy (`VACUUM INTO` / `mv` duplicates `_outbox`).
