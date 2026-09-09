@@ -126,6 +126,8 @@ fn install_capture(conn: &Connection, path: &Path) -> Result<Nudge> {
     let tables = [
         TableSpec::new("ingest_runs", CaptureMode::After),
         TableSpec::new("aircraft", CaptureMode::Full).exclude(STATE_HASH),
+        TableSpec::new("aircraft_ref", CaptureMode::After),
+        TableSpec::new("engine_ref", CaptureMode::After),
         TableSpec::new("deregistered", CaptureMode::Full).exclude(STATE_HASH),
         TableSpec::new("documents", CaptureMode::After),
         TableSpec::new("parse_errors", CaptureMode::After).exclude(RAW_LINE),

@@ -24,7 +24,10 @@ pub fn strip_line_ending(line: &[u8]) -> &[u8] {
 
 pub fn looks_like_header(line: &[u8], markers: &[&str]) -> bool {
     let line = strip_bom(line);
-    let decoded = encoding_rs::WINDOWS_1252.decode(line).0.to_ascii_uppercase();
+    let decoded = encoding_rs::WINDOWS_1252
+        .decode(line)
+        .0
+        .to_ascii_uppercase();
     let trimmed = decoded.trim();
     markers
         .iter()

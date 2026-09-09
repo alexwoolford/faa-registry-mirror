@@ -86,7 +86,11 @@ mod tests {
 
     #[test]
     fn parses_certificate_and_other_names() {
-        let parsed = parse_dealer(&fixture_dealer("26-0001", "CESSNA AIRCRAFT CO", "TEXTRON AVIATION"));
+        let parsed = parse_dealer(&fixture_dealer(
+            "26-0001",
+            "CESSNA AIRCRAFT CO",
+            "TEXTRON AVIATION",
+        ));
         assert!(parsed.errors.is_empty());
         let rec = &parsed.records[0];
         assert_eq!(rec.certificate_number, "26-0001");

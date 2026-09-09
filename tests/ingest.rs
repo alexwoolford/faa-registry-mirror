@@ -109,16 +109,60 @@ fn join_lines(lines: &[Vec<u8>]) -> Vec<u8> {
 }
 
 fn build_zip(master_lines: &[Vec<u8>]) -> Vec<u8> {
+    build_zip_refs(master_lines, &[acftref_line()], &[engine_line()])
+}
+
+fn build_zip_refs(master_lines: &[Vec<u8>], acftref: &[Vec<u8>], engine: &[Vec<u8>]) -> Vec<u8> {
     write_test_zip(&[
         ("MASTER.txt", &join_lines(master_lines)),
-        ("ACFTREF.txt", &join_lines(&[acftref_line()])),
-        ("ENGINE.txt", &join_lines(&[engine_line()])),
+        ("ACFTREF.txt", &join_lines(acftref)),
+        ("ENGINE.txt", &join_lines(engine)),
         ("DEREG.txt", &join_lines(&[dereg_line()])),
         ("DOCINDEX.txt", &join_lines(&[docindex_line()])),
         ("DEALER.txt", &join_lines(&[dealer_line()])),
         ("RESERVED.txt", &join_lines(&[reserved_line()])),
     ])
     .expect("zip")
+}
+
+fn acftref_extra() -> Vec<u8> {
+    let mut buf = padded_record(158);
+    write_field(&mut buf, 1, "7100510");
+    write_field(&mut buf, 9, "PIPER");
+    write_field(&mut buf, 40, "J3C-65");
+    write_field(&mut buf, 61, "4");
+    write_field(&mut buf, 63, "1");
+    write_field(&mut buf, 73, "2");
+    buf
+}
+
+fn engine_rotax() -> Vec<u8> {
+    let mut buf = padded_record(47);
+    write_field(&mut buf, 1, "55593");
+    write_field(&mut buf, 7, "ROTAX");
+    write_field(&mut buf, 18, "912 IS");
+    write_field(&mut buf, 32, "7");
+    write_field(&mut buf, 35, "100");
+    buf
+}
+
+fn outbox_ops_after(conn: &rusqlite::Connection, tbl: &str, min_seq: i64) -> (i64, i64, i64) {
+    let count = |op: &str| -> i64 {
+        conn.query_row(
+            "SELECT count(*) FROM _outbox WHERE tbl = ?1 AND op = ?2 AND seq > ?3",
+            rusqlite::params![tbl, op, min_seq],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    (count("I"), count("U"), count("D"))
+}
+
+fn max_outbox_seq(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM _outbox", [], |row| {
+        row.get(0)
+    })
+    .unwrap()
 }
 
 fn temp_paths(label: &str) -> (PathBuf, PathBuf) {
@@ -134,7 +178,12 @@ fn temp_paths(label: &str) -> (PathBuf, PathBuf) {
     (dir.join("registry.sqlite"), dir.join("dump.zip"))
 }
 
-fn run_ingest(db: &Path, zip: &Path, bytes: &[u8], force: bool) -> faa_registry_mirror::db::ingest::IngestStats {
+fn run_ingest(
+    db: &Path,
+    zip: &Path,
+    bytes: &[u8],
+    force: bool,
+) -> faa_registry_mirror::db::ingest::IngestStats {
     std::fs::write(zip, bytes).unwrap();
     ingest(&IngestOptions {
         db_path: db.to_path_buf(),
@@ -311,5 +360,83 @@ fn refuses_truncated_master() {
     assert_eq!(aircraft, 0);
     let status = query::latest_status(&conn).unwrap().expect("failed run");
     assert_eq!(status.status, "failed");
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn dictionary_upsert_does_not_rewrite_unchanged_codes() {
+    let (db, zip) = temp_paths("dicts");
+    let masters = [master_line("12345", "BANK OF UTAH TRUSTEE", "SN1", "CO")];
+    let first = build_zip_refs(
+        &masters,
+        &[acftref_line(), acftref_extra()],
+        &[engine_line(), engine_rotax()],
+    );
+    run_ingest(&db, &zip, &first, false);
+
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    let n_ac: i64 = conn
+        .query_row("SELECT count(*) FROM aircraft_ref", [], |row| row.get(0))
+        .unwrap();
+    let n_eng: i64 = conn
+        .query_row("SELECT count(*) FROM engine_ref", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(n_ac, 2);
+    assert_eq!(n_eng, 2);
+    let (i, u, d) = outbox_ops_after(&conn, "aircraft_ref", 0);
+    assert_eq!((i, u, d), (2, 0, 0));
+    let (i, u, d) = outbox_ops_after(&conn, "engine_ref", 0);
+    assert_eq!((i, u, d), (2, 0, 0));
+    let seq_after_first = max_outbox_seq(&conn);
+    drop(conn);
+
+    let again = build_zip_refs(
+        &masters,
+        &[acftref_line(), acftref_extra()],
+        &[engine_line(), engine_rotax()],
+    );
+    run_ingest(&db, &zip, &again, true);
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    let cessna: String = conn
+        .query_row(
+            "SELECT mfr FROM aircraft_ref WHERE code = '2072703'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(cessna, "CESSNA");
+    assert_eq!(
+        outbox_ops_after(&conn, "aircraft_ref", seq_after_first),
+        (0, 0, 0),
+        "unchanged ACFTREF must not delete/reinsert"
+    );
+    assert_eq!(
+        outbox_ops_after(&conn, "engine_ref", seq_after_first),
+        (0, 0, 0),
+        "unchanged ENGINE must not delete/reinsert"
+    );
+    let seq_after_same = max_outbox_seq(&conn);
+    drop(conn);
+
+    let dropped = build_zip_refs(&masters, &[acftref_line()], &[engine_line()]);
+    run_ingest(&db, &zip, &dropped, true);
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    let n_ac: i64 = conn
+        .query_row("SELECT count(*) FROM aircraft_ref", [], |row| row.get(0))
+        .unwrap();
+    let n_eng: i64 = conn
+        .query_row("SELECT count(*) FROM engine_ref", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(n_ac, 1);
+    assert_eq!(n_eng, 1);
+    assert_eq!(
+        outbox_ops_after(&conn, "aircraft_ref", seq_after_same),
+        (0, 0, 1)
+    );
+    assert_eq!(
+        outbox_ops_after(&conn, "engine_ref", seq_after_same),
+        (0, 0, 1)
+    );
+
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

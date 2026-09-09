@@ -41,8 +41,8 @@ cargo run --release -- status
 | File | Table | Strategy |
 | --- | --- | --- |
 | `MASTER.txt` | `aircraft` | SCD Type 2 on ownership/registration state |
-| `ACFTREF.txt` | `aircraft_ref` | Full replace (code dictionary) |
-| `ENGINE.txt` | `engine_ref` | Full replace (code dictionary) |
+| `ACFTREF.txt` | `aircraft_ref` | Upsert by `code` (captured dictionary; not a nightly delete-all) |
+| `ENGINE.txt` | `engine_ref` | Upsert by `code` (captured dictionary; not a nightly delete-all) |
 | `DEREG.txt` | `deregistered` | SCD Type 2 |
 | `DOCINDEX.txt` | `documents` | Append-only unique rows (accumulates the FAA’s ~180-day window) |
 | `DEALER.txt` | `dealers` | Full replace (dealer certificate roster) |

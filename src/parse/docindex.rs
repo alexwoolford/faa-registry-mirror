@@ -77,7 +77,12 @@ mod tests {
 
     #[test]
     fn extracts_n_number_and_trailing_doc_type() {
-        let parsed = parse_docindex(&fixture_docindex("12345", "BANK, N.A.", "DOC000111222", "SECURITY"));
+        let parsed = parse_docindex(&fixture_docindex(
+            "12345",
+            "BANK, N.A.",
+            "DOC000111222",
+            "SECURITY",
+        ));
         assert_eq!(parsed.records.len(), 1);
         let rec = &parsed.records[0];
         assert_eq!(rec.n_number, "N12345");
