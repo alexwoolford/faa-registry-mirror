@@ -112,9 +112,6 @@ pub fn vacuum_into(src: &Path, dest: &Path) -> Result<()> {
 
 const DB_NAME: &str = "faa-registry-mirror";
 const STATE_HASH: &[&str] = &["state_hash"];
-/// Local sqlite only until mosaic has a warehouse consumer. Drop leftover
-/// `_cap_*` triggers from older binaries so they cannot keep emitting.
-const RETIRED_CAPTURE_TABLES: &[&str] = &["deregistered", "documents", "parse_errors"];
 
 fn apply_schema(conn: &Connection) -> Result<()> {
     conn.pragma_update(None, "temp_store", "MEMORY")?;
@@ -125,19 +122,7 @@ fn apply_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn drop_retired_capture_triggers(conn: &Connection) -> Result<()> {
-    for table in RETIRED_CAPTURE_TABLES {
-        for op in ["I", "U", "D"] {
-            let name = format!("_cap_{op}_{table}");
-            conn.execute(&format!("DROP TRIGGER IF EXISTS \"{name}\""), [])
-                .with_context(|| format!("drop {name}"))?;
-        }
-    }
-    Ok(())
-}
-
 fn install_capture(conn: &Connection, path: &Path) -> Result<Nudge> {
-    drop_retired_capture_triggers(conn)?;
     let tables = [
         TableSpec::new("ingest_runs", CaptureMode::After),
         TableSpec::new("aircraft", CaptureMode::Full).exclude(STATE_HASH),
@@ -490,7 +475,8 @@ mod tests {
     }
 
     fn plant_retired_cap_triggers(conn: &Connection) {
-        for table in RETIRED_CAPTURE_TABLES {
+        const RETIRED: &[&str] = &["deregistered", "documents", "parse_errors"];
+        for table in RETIRED {
             for op in ["I", "U", "D"] {
                 let name = format!("_cap_{op}_{table}");
                 let when = match op {
