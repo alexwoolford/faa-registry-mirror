@@ -40,13 +40,13 @@ cargo run --release -- status
 
 | File | Table | Strategy |
 | --- | --- | --- |
-| `MASTER.txt` | `aircraft` | SCD Type 2 on ownership/registration state |
-| `ACFTREF.txt` | `aircraft_ref` | Full replace (code dictionary) |
-| `ENGINE.txt` | `engine_ref` | Full replace (code dictionary) |
-| `DEREG.txt` | `deregistered` | SCD Type 2 |
-| `DOCINDEX.txt` | `documents` | Append-only unique rows (accumulates the FAA’s ~180-day window) |
-| `DEALER.txt` | `dealers` | Full replace (dealer certificate roster) |
-| `RESERVED.txt` | `reserved` | Full replace (current N-number reservations) |
+| `MASTER.txt` | `aircraft` | SCD Type 2 on ownership/registration state (captured; mosaic should treat current rows only — [docs/CAPTURE.md](docs/CAPTURE.md)) |
+| `ACFTREF.txt` | `aircraft_ref` | Upsert by `code` (captured dictionary; not a nightly delete-all) |
+| `ENGINE.txt` | `engine_ref` | Upsert by `code` (captured dictionary; not a nightly delete-all) |
+| `DEREG.txt` | `deregistered` | SCD Type 2 (local sqlite; not captured) |
+| `DOCINDEX.txt` | `documents` | Append-only unique rows (local sqlite; not captured) |
+| `DEALER.txt` | `dealers` | Full replace (dealer certificate roster; not captured) |
+| `RESERVED.txt` | `reserved` | Full replace (current N-number reservations; not captured) |
 
 ## Identifiers
 

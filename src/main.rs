@@ -50,9 +50,7 @@ enum Command {
         faa_user_agent: Option<String>,
     },
     /// Show current registration and ownership history for an N-number or Mode S hex
-    Lookup {
-        n_number: String,
-    },
+    Lookup { n_number: String },
     /// Full-text search of current registrant names
     SearchOwner {
         name: String,
@@ -62,9 +60,7 @@ enum Command {
     /// Show the most recent ingest run
     Status,
     /// Consistent snapshot via VACUUM INTO (bundled SQLite; host sqlite3 3.34 cannot open STRICT)
-    VacuumInto {
-        dest: PathBuf,
-    },
+    VacuumInto { dest: PathBuf },
 }
 
 fn main() -> Result<()> {

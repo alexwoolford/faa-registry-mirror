@@ -1,33 +1,13 @@
 use crate::canonical_n_number;
 use crate::dates::faa_date;
-use crate::model::{join_other_names, DeregRecord, ParseError, ParsedFile};
-use crate::parse::fixed_width::{field, looks_like_header, strip_bom, strip_line_ending};
+use crate::model::{join_other_names, DeregRecord, ParsedFile};
+use crate::parse::fixed_width::{field, parse_lines};
 
 const MIN_LEN: usize = 48;
 const HEADER_MARKERS: &[&str] = &["N-NUMBER", "N-NUM"];
 
 pub fn parse_dereg(bytes: &[u8]) -> ParsedFile<DeregRecord> {
-    let bytes = strip_bom(bytes);
-    let mut out = ParsedFile::default();
-    for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
-        let line = strip_line_ending(raw);
-        if line.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
-        }
-        if idx == 0 && looks_like_header(line, HEADER_MARKERS) {
-            continue;
-        }
-        match parse_row(line) {
-            Ok(record) => out.records.push(record),
-            Err(error) => out.errors.push(ParseError {
-                file_name: "DEREG.txt".into(),
-                line_number: idx + 1,
-                raw_line: line.to_vec(),
-                error,
-            }),
-        }
-    }
-    out
+    parse_lines(bytes, "DEREG.txt", HEADER_MARKERS, parse_row)
 }
 
 fn parse_row(line: &[u8]) -> Result<DeregRecord, String> {

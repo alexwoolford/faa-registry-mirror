@@ -1,32 +1,12 @@
 use crate::dates::faa_date;
-use crate::model::{DocumentRecord, ParseError, ParsedFile};
-use crate::parse::fixed_width::{field, looks_like_header, strip_bom, strip_line_ending};
+use crate::model::{DocumentRecord, ParsedFile};
+use crate::parse::fixed_width::{field, parse_lines};
 
 const MIN_LEN: usize = 90;
 const HEADER_MARKERS: &[&str] = &["TYPE", "COLLATERAL"];
 
 pub fn parse_docindex(bytes: &[u8]) -> ParsedFile<DocumentRecord> {
-    let bytes = strip_bom(bytes);
-    let mut out = ParsedFile::default();
-    for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
-        let line = strip_line_ending(raw);
-        if line.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
-        }
-        if idx == 0 && looks_like_header(line, HEADER_MARKERS) {
-            continue;
-        }
-        match parse_row(line) {
-            Ok(record) => out.records.push(record),
-            Err(error) => out.errors.push(ParseError {
-                file_name: "DOCINDEX.txt".into(),
-                line_number: idx + 1,
-                raw_line: line.to_vec(),
-                error,
-            }),
-        }
-    }
-    out
+    parse_lines(bytes, "DOCINDEX.txt", HEADER_MARKERS, parse_row)
 }
 
 fn parse_row(line: &[u8]) -> Result<DocumentRecord, String> {
@@ -77,7 +57,12 @@ mod tests {
 
     #[test]
     fn extracts_n_number_and_trailing_doc_type() {
-        let parsed = parse_docindex(&fixture_docindex("12345", "BANK, N.A.", "DOC000111222", "SECURITY"));
+        let parsed = parse_docindex(&fixture_docindex(
+            "12345",
+            "BANK, N.A.",
+            "DOC000111222",
+            "SECURITY",
+        ));
         assert_eq!(parsed.records.len(), 1);
         let rec = &parsed.records[0];
         assert_eq!(rec.n_number, "N12345");

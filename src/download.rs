@@ -37,10 +37,7 @@ pub fn resolve_user_agent(cli: Option<&str>) -> String {
 fn default_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
-    headers.insert(
-        ACCEPT_LANGUAGE,
-        HeaderValue::from_static("en-US,en;q=0.9"),
-    );
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
     headers
 }
 
@@ -104,8 +101,7 @@ pub fn write_zip_cache(dir: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub fn extract_named(zip_bytes: &[u8], filename: &str) -> Result<Vec<u8>> {
-    let mut archive =
-        ZipArchive::new(Cursor::new(zip_bytes)).context("open zip archive")?;
+    let mut archive = ZipArchive::new(Cursor::new(zip_bytes)).context("open zip archive")?;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).context("read zip entry")?;
         let name = file.name().replace('\\', "/");

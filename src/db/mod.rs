@@ -22,13 +22,9 @@ pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
-    conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.busy_timeout(std::time::Duration::from_millis(5000))?;
-    conn.execute_batch(include_str!("schema.sql"))
-        .context("apply schema")?;
-    ensure_column(&conn, "ingest_runs", "dealer_rows", "INTEGER")?;
-    ensure_column(&conn, "ingest_runs", "reserved_rows", "INTEGER")?;
+    apply_schema(&conn)?;
     Ok(conn)
 }
 
@@ -60,11 +56,7 @@ pub fn open_work(path: &Path) -> Result<WorkDb> {
     }
     let conn = Connection::open(path).with_context(|| format!("open work {}", path.display()))?;
     apply_runtime_pragmas(&conn)?;
-    conn.pragma_update(None, "temp_store", "MEMORY")?;
-    conn.execute_batch(include_str!("schema.sql"))
-        .context("apply schema")?;
-    ensure_column(&conn, "ingest_runs", "dealer_rows", "INTEGER")?;
-    ensure_column(&conn, "ingest_runs", "reserved_rows", "INTEGER")?;
+    apply_schema(&conn)?;
     migrate_strict(&conn)?;
     conn.execute_batch(include_str!("schema.sql"))
         .context("reapply indexes after strict migrate")?;
@@ -120,15 +112,37 @@ pub fn vacuum_into(src: &Path, dest: &Path) -> Result<()> {
 
 const DB_NAME: &str = "faa-registry-mirror";
 const STATE_HASH: &[&str] = &["state_hash"];
-const RAW_LINE: &[&str] = &["raw_line"];
+/// Local sqlite only until mosaic has a warehouse consumer. Drop leftover
+/// `_cap_*` triggers from older binaries so they cannot keep emitting.
+const RETIRED_CAPTURE_TABLES: &[&str] = &["deregistered", "documents", "parse_errors"];
+
+fn apply_schema(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.execute_batch(include_str!("schema.sql"))
+        .context("apply schema")?;
+    ensure_column(conn, "ingest_runs", "dealer_rows", "INTEGER")?;
+    ensure_column(conn, "ingest_runs", "reserved_rows", "INTEGER")?;
+    Ok(())
+}
+
+fn drop_retired_capture_triggers(conn: &Connection) -> Result<()> {
+    for table in RETIRED_CAPTURE_TABLES {
+        for op in ["I", "U", "D"] {
+            let name = format!("_cap_{op}_{table}");
+            conn.execute(&format!("DROP TRIGGER IF EXISTS \"{name}\""), [])
+                .with_context(|| format!("drop {name}"))?;
+        }
+    }
+    Ok(())
+}
 
 fn install_capture(conn: &Connection, path: &Path) -> Result<Nudge> {
+    drop_retired_capture_triggers(conn)?;
     let tables = [
         TableSpec::new("ingest_runs", CaptureMode::After),
         TableSpec::new("aircraft", CaptureMode::Full).exclude(STATE_HASH),
-        TableSpec::new("deregistered", CaptureMode::Full).exclude(STATE_HASH),
-        TableSpec::new("documents", CaptureMode::After),
-        TableSpec::new("parse_errors", CaptureMode::After).exclude(RAW_LINE),
+        TableSpec::new("aircraft_ref", CaptureMode::After),
+        TableSpec::new("engine_ref", CaptureMode::After),
     ];
     install(conn, &CaptureConfig::new(DB_NAME, path, &tables))
 }
@@ -401,6 +415,144 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retired_tables_are_not_captured() {
+        let (dir, db) = tmp_work();
+        let n: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'trigger'
+                   AND name IN (
+                     '_cap_I_deregistered','_cap_U_deregistered','_cap_D_deregistered',
+                     '_cap_I_documents','_cap_U_documents','_cap_D_documents',
+                     '_cap_I_parse_errors','_cap_U_parse_errors','_cap_D_parse_errors'
+                   )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0);
+        let ingest_id = insert_run(&db);
+        db.execute(
+            "INSERT INTO parse_errors (ingest_id, file_name, line_number, raw_line, error)
+             VALUES (?1, 'MASTER.txt', 2, x'41', 'duplicate')",
+            params![ingest_id],
+        )
+        .unwrap();
+        db.execute("DELETE FROM dealers", []).unwrap();
+        db.execute(
+            "INSERT INTO dealers (
+                certificate_number, ownership, certificate_issue_date, expiration_date,
+                expiration_flag, cumulative_issue_count, name, street, street2, city, state,
+                zip_code, other_names, ingest_id
+             ) VALUES ('26-0001','7','2023-01-01','2025-12-31','','','CESSNA','S','','WICHITA','KS','67210','',?1)",
+            params![ingest_id],
+        )
+        .unwrap();
+        db.execute("DELETE FROM reserved", []).unwrap();
+        db.execute(
+            "INSERT INTO reserved (
+                n_number, registrant, street, street2, city, state, zip_code, reserve_date,
+                type_reservation, expiration_notice_date, n_number_for_change, purge_date, ingest_id
+             ) VALUES ('N1WM','META','S','','MENLO PARK','CA','94025','2024-01-15','FP','','','2027-03-05',?1)",
+            params![ingest_id],
+        )
+        .unwrap();
+        let extra: Vec<(String, String)> = outbox_ops(&db)
+            .into_iter()
+            .filter(|(tbl, _)| {
+                matches!(
+                    tbl.as_str(),
+                    "parse_errors" | "dealers" | "reserved" | "documents" | "deregistered"
+                )
+            })
+            .collect();
+        assert!(extra.is_empty(), "{extra:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn retired_cap_trigger_count(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name IN (
+                 '_cap_I_deregistered','_cap_U_deregistered','_cap_D_deregistered',
+                 '_cap_I_documents','_cap_U_documents','_cap_D_documents',
+                 '_cap_I_parse_errors','_cap_U_parse_errors','_cap_D_parse_errors'
+               )",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn plant_retired_cap_triggers(conn: &Connection) {
+        for table in RETIRED_CAPTURE_TABLES {
+            for op in ["I", "U", "D"] {
+                let name = format!("_cap_{op}_{table}");
+                let when = match op {
+                    "I" => "INSERT",
+                    "U" => "UPDATE",
+                    _ => "DELETE",
+                };
+                conn.execute(
+                    &format!(
+                        "CREATE TRIGGER \"{name}\" AFTER {when} ON \"{table}\"
+                         BEGIN
+                           INSERT INTO _outbox(tbl, op, key, before, after)
+                           VALUES ('{table}', '{op}', '{{}}', NULL, '{{}}');
+                         END"
+                    ),
+                    [],
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn open_work_drops_preexisting_retired_cap_triggers() {
+        let (dir, db) = tmp_work();
+        plant_retired_cap_triggers(&db);
+        assert_eq!(retired_cap_trigger_count(&db), 9);
+        let path = dir.join("faa-registry.sqlite");
+        drop(db);
+        let db = open_work(&path).unwrap();
+        assert_eq!(retired_cap_trigger_count(&db), 0);
+        let before = outbox_count(&db);
+        let ingest_id = insert_run(&db);
+        db.execute(
+            "INSERT INTO deregistered (
+                n_number, serial_number, mfr_mdl_code, status_code, owner_name,
+                street, street2, city, state, zip_code, eng_mfr_mdl, year_mfr,
+                certification, region, county, country, air_worth_date, cancel_date,
+                mode_s_code, type_registrant, export_country, last_action_date,
+                cert_issue_date, physical_street, physical_street2, physical_city,
+                physical_state, physical_zip, physical_county, physical_country,
+                other_names, kit_mfr, kit_model, mode_s_hex, icao24, state_hash,
+                valid_from, is_current, ingest_id
+             ) VALUES (
+                'N99','1','M','V','X',
+                'S','','DENVER','CO','80202','E','1998',
+                '','C','001','US','1998-04-30','2020-01-01',
+                '','3','','2020-01-01',
+                '','','','',
+                '','','','',
+                '','','','ABCDEF','abcdef','hash',
+                '2026-09-01',1,?1
+             )",
+            params![ingest_id],
+        )
+        .unwrap();
+        let extra: Vec<(String, String)> = outbox_ops(&db)
+            .into_iter()
+            .filter(|(tbl, _)| tbl == "deregistered")
+            .collect();
+        assert!(extra.is_empty(), "{extra:?}");
+        assert!(outbox_count(&db) >= before);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

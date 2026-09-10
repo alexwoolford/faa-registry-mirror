@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::model::{decode_status_code, decode_type_aircraft, decode_type_engine, decode_type_registrant};
+use crate::model::{
+    decode_status_code, decode_type_aircraft, decode_type_engine, decode_type_registrant,
+};
 use crate::{canonical_n_number, looks_like_mode_s_hex};
 
 #[derive(Debug, Clone)]
@@ -178,7 +180,8 @@ fn load_aircraft_versions(conn: &Connection, n: &str) -> Result<Vec<AircraftVers
             engine_model: row.get(27)?,
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>().context("load aircraft versions")
+    rows.collect::<Result<Vec<_>, _>>()
+        .context("load aircraft versions")
 }
 
 fn load_aircraft_versions_by_hex(conn: &Connection, hex: &str) -> Result<Vec<AircraftVersion>> {
@@ -253,7 +256,8 @@ fn load_dereg(conn: &Connection, n: &str) -> Result<Vec<DeregVersion>> {
             is_current: row.get::<_, i64>(8)? == 1,
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>().context("load deregistered")
+    rows.collect::<Result<Vec<_>, _>>()
+        .context("load deregistered")
 }
 
 fn load_documents(conn: &Connection, n: &str) -> Result<Vec<DocumentHit>> {
@@ -274,7 +278,8 @@ fn load_documents(conn: &Connection, n: &str) -> Result<Vec<DocumentHit>> {
             serial_id: row.get(6)?,
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>().context("load documents")
+    rows.collect::<Result<Vec<_>, _>>()
+        .context("load documents")
 }
 
 pub fn search_owner(conn: &Connection, name: &str, limit: usize) -> Result<Vec<OwnerHit>> {
@@ -390,7 +395,11 @@ pub fn format_lookup(result: &LookupResult) -> String {
     if !result.deregistered.is_empty() {
         out.push_str("\nDeregistration\n");
         for d in &result.deregistered {
-            let flag = if d.is_current { "current" } else { "historical" };
+            let flag = if d.is_current {
+                "current"
+            } else {
+                "historical"
+            };
             out.push_str(&format!(
                 "  [{flag}] cancel {}  owner {}  export {}  status {}\n",
                 empty(&d.cancel_date),
@@ -467,12 +476,7 @@ pub fn format_owner_hits(hits: &[OwnerHit]) -> String {
         };
         out.push_str(&format!(
             "{:<8}  {:<40}  {}, {}  {}  status {}\n",
-            hit.n_number,
-            hit.owner_name,
-            hit.city,
-            hit.state,
-            plane,
-            hit.status_code
+            hit.n_number, hit.owner_name, hit.city, hit.state, plane, hit.status_code
         ));
     }
     out

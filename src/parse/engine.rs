@@ -1,31 +1,11 @@
-use crate::model::{EngineRef, ParseError, ParsedFile};
-use crate::parse::fixed_width::{field, looks_like_header, strip_bom, strip_line_ending};
+use crate::model::{EngineRef, ParsedFile};
+use crate::parse::fixed_width::{field, parse_lines};
 
 const MIN_LEN: usize = 5;
 const HEADER_MARKERS: &[&str] = &["CODE"];
 
 pub fn parse_engine(bytes: &[u8]) -> ParsedFile<EngineRef> {
-    let bytes = strip_bom(bytes);
-    let mut out = ParsedFile::default();
-    for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
-        let line = strip_line_ending(raw);
-        if line.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
-        }
-        if idx == 0 && looks_like_header(line, HEADER_MARKERS) {
-            continue;
-        }
-        match parse_row(line) {
-            Ok(record) => out.records.push(record),
-            Err(error) => out.errors.push(ParseError {
-                file_name: "ENGINE.txt".into(),
-                line_number: idx + 1,
-                raw_line: line.to_vec(),
-                error,
-            }),
-        }
-    }
-    out
+    parse_lines(bytes, "ENGINE.txt", HEADER_MARKERS, parse_row)
 }
 
 fn parse_row(line: &[u8]) -> Result<EngineRef, String> {

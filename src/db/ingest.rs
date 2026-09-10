@@ -3,13 +3,13 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
 
+use crate::canonical_icao24;
+use crate::dates::{require_utc_date, require_utc_instant, utc_date, utc_iso};
 use crate::download::{self, DEFAULT_ZIP_URL};
 use crate::model::{
     AircraftRef, DealerRecord, DeregRecord, DocumentRecord, EngineRef, MasterRecord, ParseError,
     ReservedRecord,
 };
-use crate::canonical_icao24;
-use crate::dates::{require_utc_date, require_utc_instant, utc_date, utc_iso};
 use crate::parse::{
     parse_acftref, parse_dealer, parse_dereg, parse_docindex, parse_engine, parse_master,
     parse_reserved,
@@ -154,8 +154,8 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     let tx = work.transaction().context("begin ingest transaction")?;
     let ingest_id = insert_run_start(&tx, &as_of, &started_at, &source, &zip_hash)?;
 
-    replace_aircraft_ref(&tx, &acftref.records)?;
-    replace_engine_ref(&tx, &engine.records)?;
+    upsert_aircraft_ref(&tx, &acftref.records)?;
+    upsert_engine_ref(&tx, &engine.records)?;
     replace_dealers(&tx, ingest_id, &dealers.records)?;
     replace_reserved(&tx, ingest_id, &reserved.records)?;
 
@@ -163,14 +163,26 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
         source: source.clone(),
         zip_hash: zip_hash.clone(),
         master_rows: master.records.len(),
-        skipped_rows: parse_errors.len(),
         dealer_rows: dealers.records.len(),
         reserved_rows: reserved.records.len(),
         ..IngestStats::default()
     };
 
-    apply_master_scd(&tx, ingest_id, &master.records, &mut stats)?;
-    apply_dereg_scd(&tx, ingest_id, &dereg.records, &mut stats)?;
+    apply_master_scd(
+        &tx,
+        ingest_id,
+        &master.records,
+        &mut stats,
+        &mut parse_errors,
+    )?;
+    apply_dereg_scd(
+        &tx,
+        ingest_id,
+        &dereg.records,
+        &mut stats,
+        &mut parse_errors,
+    )?;
+    stats.skipped_rows = parse_errors.len();
     stats.documents_inserted = insert_documents(&tx, ingest_id, &documents.records)?;
     insert_parse_errors(&tx, ingest_id, &parse_errors)?;
     rebuild_fts(&tx)?;
@@ -312,50 +324,104 @@ fn finish_run(tx: &Transaction<'_>, ingest_id: i64, stats: &IngestStats) -> Resu
     Ok(())
 }
 
-fn replace_aircraft_ref(tx: &Transaction<'_>, rows: &[AircraftRef]) -> Result<()> {
-    tx.execute("DELETE FROM aircraft_ref", [])?;
-    let mut stmt = tx.prepare(
-        "INSERT INTO aircraft_ref (
-            code, mfr, model, type_aircraft, type_engine, category, builder_cert,
-            no_eng, no_seats, ac_weight, speed, tc_data_sheet, tc_data_holder
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-    )?;
-    for row in rows {
-        stmt.execute(params![
-            row.code,
-            row.mfr,
-            row.model,
-            row.type_aircraft,
-            row.type_engine,
-            row.category,
-            row.builder_cert,
-            row.no_eng,
-            row.no_seats,
-            row.ac_weight,
-            row.speed,
-            row.tc_data_sheet,
-            row.tc_data_holder,
-        ])?;
+fn upsert_aircraft_ref(tx: &Transaction<'_>, rows: &[AircraftRef]) -> Result<()> {
+    tx.execute_batch("CREATE TEMP TABLE aircraft_ref_in (code TEXT PRIMARY KEY)")?;
+    {
+        let mut keep = tx.prepare("INSERT OR IGNORE INTO aircraft_ref_in (code) VALUES (?1)")?;
+        let mut stmt = tx.prepare(
+            "INSERT INTO aircraft_ref (
+                code, mfr, model, type_aircraft, type_engine, category, builder_cert,
+                no_eng, no_seats, ac_weight, speed, tc_data_sheet, tc_data_holder
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+             ON CONFLICT(code) DO UPDATE SET
+                mfr = excluded.mfr,
+                model = excluded.model,
+                type_aircraft = excluded.type_aircraft,
+                type_engine = excluded.type_engine,
+                category = excluded.category,
+                builder_cert = excluded.builder_cert,
+                no_eng = excluded.no_eng,
+                no_seats = excluded.no_seats,
+                ac_weight = excluded.ac_weight,
+                speed = excluded.speed,
+                tc_data_sheet = excluded.tc_data_sheet,
+                tc_data_holder = excluded.tc_data_holder
+             WHERE aircraft_ref.mfr IS DISTINCT FROM excluded.mfr
+                OR aircraft_ref.model IS DISTINCT FROM excluded.model
+                OR aircraft_ref.type_aircraft IS DISTINCT FROM excluded.type_aircraft
+                OR aircraft_ref.type_engine IS DISTINCT FROM excluded.type_engine
+                OR aircraft_ref.category IS DISTINCT FROM excluded.category
+                OR aircraft_ref.builder_cert IS DISTINCT FROM excluded.builder_cert
+                OR aircraft_ref.no_eng IS DISTINCT FROM excluded.no_eng
+                OR aircraft_ref.no_seats IS DISTINCT FROM excluded.no_seats
+                OR aircraft_ref.ac_weight IS DISTINCT FROM excluded.ac_weight
+                OR aircraft_ref.speed IS DISTINCT FROM excluded.speed
+                OR aircraft_ref.tc_data_sheet IS DISTINCT FROM excluded.tc_data_sheet
+                OR aircraft_ref.tc_data_holder IS DISTINCT FROM excluded.tc_data_holder",
+        )?;
+        for row in rows {
+            keep.execute(params![row.code])?;
+            stmt.execute(params![
+                row.code,
+                row.mfr,
+                row.model,
+                row.type_aircraft,
+                row.type_engine,
+                row.category,
+                row.builder_cert,
+                row.no_eng,
+                row.no_seats,
+                row.ac_weight,
+                row.speed,
+                row.tc_data_sheet,
+                row.tc_data_holder,
+            ])?;
+        }
     }
+    tx.execute(
+        "DELETE FROM aircraft_ref WHERE code NOT IN (SELECT code FROM aircraft_ref_in)",
+        [],
+    )?;
+    tx.execute("DROP TABLE aircraft_ref_in", [])?;
     Ok(())
 }
 
-fn replace_engine_ref(tx: &Transaction<'_>, rows: &[EngineRef]) -> Result<()> {
-    tx.execute("DELETE FROM engine_ref", [])?;
-    let mut stmt = tx.prepare(
-        "INSERT INTO engine_ref (code, mfr, model, type_engine, horsepower, thrust)
-         VALUES (?1,?2,?3,?4,?5,?6)",
-    )?;
-    for row in rows {
-        stmt.execute(params![
-            row.code,
-            row.mfr,
-            row.model,
-            row.type_engine,
-            row.horsepower,
-            row.thrust
-        ])?;
+fn upsert_engine_ref(tx: &Transaction<'_>, rows: &[EngineRef]) -> Result<()> {
+    tx.execute_batch("CREATE TEMP TABLE engine_ref_in (code TEXT PRIMARY KEY)")?;
+    {
+        let mut keep = tx.prepare("INSERT OR IGNORE INTO engine_ref_in (code) VALUES (?1)")?;
+        let mut stmt = tx.prepare(
+            "INSERT INTO engine_ref (code, mfr, model, type_engine, horsepower, thrust)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(code) DO UPDATE SET
+                mfr = excluded.mfr,
+                model = excluded.model,
+                type_engine = excluded.type_engine,
+                horsepower = excluded.horsepower,
+                thrust = excluded.thrust
+             WHERE engine_ref.mfr IS DISTINCT FROM excluded.mfr
+                OR engine_ref.model IS DISTINCT FROM excluded.model
+                OR engine_ref.type_engine IS DISTINCT FROM excluded.type_engine
+                OR engine_ref.horsepower IS DISTINCT FROM excluded.horsepower
+                OR engine_ref.thrust IS DISTINCT FROM excluded.thrust",
+        )?;
+        for row in rows {
+            keep.execute(params![row.code])?;
+            stmt.execute(params![
+                row.code,
+                row.mfr,
+                row.model,
+                row.type_engine,
+                row.horsepower,
+                row.thrust
+            ])?;
+        }
     }
+    tx.execute(
+        "DELETE FROM engine_ref WHERE code NOT IN (SELECT code FROM engine_ref_in)",
+        [],
+    )?;
+    tx.execute("DROP TABLE engine_ref_in", [])?;
     Ok(())
 }
 
@@ -440,11 +506,21 @@ fn close_row(tx: &Transaction<'_>, table: &str, id: i64, valid_to: &str) -> Resu
     Ok(())
 }
 
+fn duplicate_n_error(file_name: &str, rec_no: usize, n_number: &str) -> ParseError {
+    ParseError {
+        file_name: file_name.to_string(),
+        line_number: rec_no,
+        raw_line: n_number.as_bytes().to_vec(),
+        error: format!("duplicate N-number {n_number}; first row wins"),
+    }
+}
+
 fn apply_master_scd(
     tx: &Transaction<'_>,
     ingest_id: i64,
     records: &[MasterRecord],
     stats: &mut IngestStats,
+    parse_errors: &mut Vec<ParseError>,
 ) -> Result<()> {
     let mut current = load_current(tx, "aircraft")?;
     let today = utc_date();
@@ -464,8 +540,9 @@ fn apply_master_scd(
          )",
     )?;
 
-    for rec in records {
+    for (i, rec) in records.iter().enumerate() {
         if !seen.insert(rec.n_number.clone()) {
+            parse_errors.push(duplicate_n_error("MASTER.txt", i + 1, &rec.n_number));
             continue;
         }
         let hash = rec.state_hash();
@@ -543,6 +620,7 @@ fn apply_dereg_scd(
     ingest_id: i64,
     records: &[DeregRecord],
     stats: &mut IngestStats,
+    parse_errors: &mut Vec<ParseError>,
 ) -> Result<()> {
     let mut current = load_current(tx, "deregistered")?;
     let today = utc_date();
@@ -562,8 +640,9 @@ fn apply_dereg_scd(
          )",
     )?;
 
-    for rec in records {
+    for (i, rec) in records.iter().enumerate() {
         if !seen.insert(rec.n_number.clone()) {
+            parse_errors.push(duplicate_n_error("DEREG.txt", i + 1, &rec.n_number));
             continue;
         }
         let hash = rec.state_hash();
@@ -675,11 +754,7 @@ fn insert_documents(
     Ok(inserted)
 }
 
-fn insert_parse_errors(
-    tx: &Transaction<'_>,
-    ingest_id: i64,
-    errors: &[ParseError],
-) -> Result<()> {
+fn insert_parse_errors(tx: &Transaction<'_>, ingest_id: i64, errors: &[ParseError]) -> Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO parse_errors (ingest_id, file_name, line_number, raw_line, error)
          VALUES (?1,?2,?3,?4,?5)",
