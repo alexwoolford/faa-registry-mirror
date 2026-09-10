@@ -6,7 +6,7 @@ Decision: **SCD history stays in work sqlite. Mosaic should see one current FAA 
 
 Work sqlite (`open_work`) is the source of truth for ownership history. `lookup` reads SCD2 `aircraft` / `deregistered` (`is_current`, `valid_from` / `valid_to`). Same-day versions are distinct via `id` / `ingest_id`.
 
-Capture (`capturable-state` v0.1.0) keys `aircraft` by surrogate `id`. A registration change closes the old row (`UPDATE is_current=0` → outbox `U`) and inserts a new `id` (outbox `I`). `capture.current` therefore holds **every SCD version**, and `warehouse.aircraft` throws the closed ones away with `is_current = 1`.
+Capture (`capturable-state` v0.1.1) keys `aircraft` by surrogate `id`. A registration change closes the old row (`UPDATE is_current=0` → outbox `U`) and inserts a new `id` (outbox `I`). `capture.current` therefore holds **every SCD version**, and `warehouse.aircraft` throws the closed ones away with `is_current = 1`.
 
 A `--snapshot` of this announce name re-emits every captured table. That is how dictionary backfill worked once. Incremental dictionary upsert is the steady state. Snapshotting MASTER + deregistration history to refresh CESSNA names is the wrong tool.
 

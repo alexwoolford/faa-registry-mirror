@@ -18,7 +18,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1"
 blake3 = "1"
-capturable-state = { git = "https://github.com/alexwoolford/capturable-state", tag = "v0.1.0" }
+capturable-state = { git = "https://github.com/alexwoolford/capturable-state", tag = "v0.1.1" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
 encoding_rs = "0.8"

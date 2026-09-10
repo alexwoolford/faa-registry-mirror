@@ -80,7 +80,7 @@ Logical name: `faa-registry-mirror`. Watch the **work** sqlite ingest writes, no
 
 Capture set: `ingest_runs` (after), `aircraft` (full; exclude `state_hash`), `aircraft_ref` / `engine_ref` (after). `deregistered`, `documents`, and `parse_errors` stay in work sqlite for `lookup` / ops; they are **not** captured until mosaic has a warehouse consumer. Dealers / reserved / FTS are not captured. SCD close is `is_current=0` (a `U`); there is no `deleted_at` on aircraft. Mosaic wants one current row per `n_number`; see [CAPTURE.md](CAPTURE.md).
 
-Outbox/triggers come from [`capturable-state`](https://github.com/alexwoolford/capturable-state) `v0.1.0`, not a copied `capture.rs`.
+Outbox/triggers come from [`capturable-state`](https://github.com/alexwoolford/capturable-state) `v0.1.1`, not a copied `capture.rs`.
 
 Env (collector is `state-capture` on this host; missing socket is ignored):
 
