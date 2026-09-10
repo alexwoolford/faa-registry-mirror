@@ -1,33 +1,13 @@
 use crate::canonical_n_number;
 use crate::dates::faa_date;
-use crate::model::{ParseError, ParsedFile, ReservedRecord};
-use crate::parse::fixed_width::{field, looks_like_header, strip_bom, strip_line_ending};
+use crate::model::{ParsedFile, ReservedRecord};
+use crate::parse::fixed_width::{field, parse_lines};
 
 const MIN_LEN: usize = 5;
 const HEADER_MARKERS: &[&str] = &["N-NUMBER", "N-NUM"];
 
 pub fn parse_reserved(bytes: &[u8]) -> ParsedFile<ReservedRecord> {
-    let bytes = strip_bom(bytes);
-    let mut out = ParsedFile::default();
-    for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
-        let line = strip_line_ending(raw);
-        if line.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
-        }
-        if idx == 0 && looks_like_header(line, HEADER_MARKERS) {
-            continue;
-        }
-        match parse_row(line) {
-            Ok(record) => out.records.push(record),
-            Err(error) => out.errors.push(ParseError {
-                file_name: "RESERVED.txt".into(),
-                line_number: idx + 1,
-                raw_line: line.to_vec(),
-                error,
-            }),
-        }
-    }
-    out
+    parse_lines(bytes, "RESERVED.txt", HEADER_MARKERS, parse_row)
 }
 
 fn parse_row(line: &[u8]) -> Result<ReservedRecord, String> {

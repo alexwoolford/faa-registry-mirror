@@ -4,7 +4,7 @@
 
 Third independent service on this host. Downloads the FAA Releasable Aircraft zip and stores MASTER / ACFTREF / ENGINE / DEREG / DOCINDEX / DEALER / RESERVED. Ownership and deregistration use SCD2; ACFTREF/ENGINE dictionaries are upserted by code (captured); DEALER and RESERVED are full-replaced each run.
 
-It is **not** registrant → ticker (that is tail-to-ticker) and **not** ADS-B trips (adsb-trip-journal). Dual FAA GETs with the producer are acceptable. This service does not import OpenSky or SEC credentials.
+It is **not** registrant → ticker (that is tail-to-ticker) and **not** ADS-B trips (adsb-trip-journal). `tail-to-ticker` reads this service’s published sqlite; it does not GET the zip again. This service does not import OpenSky or SEC credentials.
 
 Join-friendly identifiers: `n_number` with a leading `N`, lowercase `icao24`. Dates are `YYYY-MM-DD`; write instants are `YYYY-MM-DDTHH:MM:SSZ`.
 
@@ -78,7 +78,7 @@ Logical name: `faa-registry-mirror`. Watch the **work** sqlite ingest writes, no
 | `/var/lib/faa-registry-mirror/work/faa-registry.sqlite` | Watched. `_outbox` + triggers. |
 | `/var/lib/faa-registry-mirror/current/faa-registry.sqlite` | Published snapshot. Do not watch. `open()` does not install capture. |
 
-Capture set: `ingest_runs` (after), `aircraft` / `deregistered` (full; exclude `state_hash`), `aircraft_ref` / `engine_ref` (after), `documents` (after), `parse_errors` (after; exclude `raw_line`). Dealers / reserved / FTS are not captured. SCD close is `is_current=0` (a `U`); there is no `deleted_at` on aircraft.
+Capture set: `ingest_runs` (after), `aircraft` (full; exclude `state_hash`), `aircraft_ref` / `engine_ref` (after). `deregistered`, `documents`, and `parse_errors` stay in work sqlite for `lookup` / ops; they are **not** captured until mosaic has a warehouse consumer. Dealers / reserved / FTS are not captured. SCD close is `is_current=0` (a `U`); there is no `deleted_at` on aircraft. Mosaic wants one current row per `n_number`; see [CAPTURE.md](CAPTURE.md).
 
 Outbox/triggers come from [`capturable-state`](https://github.com/alexwoolford/capturable-state) `v0.1.0`, not a copied `capture.rs`.
 

@@ -62,6 +62,7 @@ install -m 0755 "$BIN_SRC" "$PREFIX/bin/faa-registry-mirror"
 install -m 0755 "$ROOT/scripts/run-ingest.sh" "$PREFIX/scripts/run-ingest.sh"
 install -m 0755 "$ROOT/scripts/run-status.sh" "$PREFIX/scripts/run-status.sh"
 install -m 0644 "$ROOT/docs/DAILY_OPS.md" "$PREFIX/docs/DAILY_OPS.md"
+install -m 0644 "$ROOT/docs/CAPTURE.md" "$PREFIX/docs/CAPTURE.md"
 
 if [[ ! -f "$ENV_DST" ]]; then
   if [[ -n "${FAA_ENV_FILE:-}" && -f "$FAA_ENV_FILE" ]]; then

@@ -1,31 +1,11 @@
-use crate::model::{AircraftRef, ParseError, ParsedFile};
-use crate::parse::fixed_width::{field, looks_like_header, strip_bom, strip_line_ending};
+use crate::model::{AircraftRef, ParsedFile};
+use crate::parse::fixed_width::{field, parse_lines};
 
 const MIN_LEN: usize = 7;
 const HEADER_MARKERS: &[&str] = &["CODE", "MFR"];
 
 pub fn parse_acftref(bytes: &[u8]) -> ParsedFile<AircraftRef> {
-    let bytes = strip_bom(bytes);
-    let mut out = ParsedFile::default();
-    for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
-        let line = strip_line_ending(raw);
-        if line.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
-        }
-        if idx == 0 && looks_like_header(line, HEADER_MARKERS) {
-            continue;
-        }
-        match parse_row(line) {
-            Ok(record) => out.records.push(record),
-            Err(error) => out.errors.push(ParseError {
-                file_name: "ACFTREF.txt".into(),
-                line_number: idx + 1,
-                raw_line: line.to_vec(),
-                error,
-            }),
-        }
-    }
-    out
+    parse_lines(bytes, "ACFTREF.txt", HEADER_MARKERS, parse_row)
 }
 
 fn parse_row(line: &[u8]) -> Result<AircraftRef, String> {

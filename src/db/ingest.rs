@@ -163,14 +163,26 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
         source: source.clone(),
         zip_hash: zip_hash.clone(),
         master_rows: master.records.len(),
-        skipped_rows: parse_errors.len(),
         dealer_rows: dealers.records.len(),
         reserved_rows: reserved.records.len(),
         ..IngestStats::default()
     };
 
-    apply_master_scd(&tx, ingest_id, &master.records, &mut stats)?;
-    apply_dereg_scd(&tx, ingest_id, &dereg.records, &mut stats)?;
+    apply_master_scd(
+        &tx,
+        ingest_id,
+        &master.records,
+        &mut stats,
+        &mut parse_errors,
+    )?;
+    apply_dereg_scd(
+        &tx,
+        ingest_id,
+        &dereg.records,
+        &mut stats,
+        &mut parse_errors,
+    )?;
+    stats.skipped_rows = parse_errors.len();
     stats.documents_inserted = insert_documents(&tx, ingest_id, &documents.records)?;
     insert_parse_errors(&tx, ingest_id, &parse_errors)?;
     rebuild_fts(&tx)?;
@@ -494,11 +506,21 @@ fn close_row(tx: &Transaction<'_>, table: &str, id: i64, valid_to: &str) -> Resu
     Ok(())
 }
 
+fn duplicate_n_error(file_name: &str, rec_no: usize, n_number: &str) -> ParseError {
+    ParseError {
+        file_name: file_name.to_string(),
+        line_number: rec_no,
+        raw_line: n_number.as_bytes().to_vec(),
+        error: format!("duplicate N-number {n_number}; first row wins"),
+    }
+}
+
 fn apply_master_scd(
     tx: &Transaction<'_>,
     ingest_id: i64,
     records: &[MasterRecord],
     stats: &mut IngestStats,
+    parse_errors: &mut Vec<ParseError>,
 ) -> Result<()> {
     let mut current = load_current(tx, "aircraft")?;
     let today = utc_date();
@@ -518,8 +540,9 @@ fn apply_master_scd(
          )",
     )?;
 
-    for rec in records {
+    for (i, rec) in records.iter().enumerate() {
         if !seen.insert(rec.n_number.clone()) {
+            parse_errors.push(duplicate_n_error("MASTER.txt", i + 1, &rec.n_number));
             continue;
         }
         let hash = rec.state_hash();
@@ -597,6 +620,7 @@ fn apply_dereg_scd(
     ingest_id: i64,
     records: &[DeregRecord],
     stats: &mut IngestStats,
+    parse_errors: &mut Vec<ParseError>,
 ) -> Result<()> {
     let mut current = load_current(tx, "deregistered")?;
     let today = utc_date();
@@ -616,8 +640,9 @@ fn apply_dereg_scd(
          )",
     )?;
 
-    for rec in records {
+    for (i, rec) in records.iter().enumerate() {
         if !seen.insert(rec.n_number.clone()) {
+            parse_errors.push(duplicate_n_error("DEREG.txt", i + 1, &rec.n_number));
             continue;
         }
         let hash = rec.state_hash();

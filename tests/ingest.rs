@@ -440,3 +440,87 @@ fn dictionary_upsert_does_not_rewrite_unchanged_codes() {
 
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
+
+#[test]
+fn duplicate_master_n_number_goes_to_parse_errors() {
+    let (db, zip) = temp_paths("dupn");
+    let first = build_zip(&[
+        master_line("12345", "BANK OF UTAH TRUSTEE", "SN1", "CO"),
+        master_line("12345", "OTHER OWNER", "SN9", "TX"),
+    ]);
+    let stats = run_ingest(&db, &zip, &first, false);
+    assert_eq!(stats.new_rows, 1);
+    assert_eq!(stats.skipped_rows, 1);
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM aircraft WHERE is_current = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let owner: String = conn
+        .query_row(
+            "SELECT owner_name FROM aircraft WHERE is_current = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owner, "BANK OF UTAH TRUSTEE");
+    let err: String = conn
+        .query_row(
+            "SELECT error FROM parse_errors WHERE file_name = 'MASTER.txt'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(err.contains("duplicate N-number"), "{err}");
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn master_change_emits_close_u_and_insert_i() {
+    let (db, zip) = temp_paths("scdcap");
+    let first = build_zip(&[master_line("12345", "BANK OF UTAH TRUSTEE", "SN1", "CO")]);
+    run_ingest(&db, &zip, &first, false);
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    let seq = max_outbox_seq(&conn);
+    drop(conn);
+
+    let second = build_zip(&[master_line("12345", "NEW OWNER LLC", "SN1", "CO")]);
+    run_ingest(&db, &zip, &second, false);
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    assert_eq!(outbox_ops_after(&conn, "aircraft", seq), (1, 1, 0));
+    let after_u: String = conn
+        .query_row(
+            "SELECT after FROM _outbox WHERE tbl = 'aircraft' AND op = 'U' AND seq > ?1",
+            rusqlite::params![seq],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(after_u.contains("\"is_current\":0") || after_u.contains("\"is_current\": 0"), "{after_u}");
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn local_only_tables_do_not_emit_outbox() {
+    let (db, zip) = temp_paths("localonly");
+    run_ingest(
+        &db,
+        &zip,
+        &build_zip(&[master_line("12345", "BANK OF UTAH TRUSTEE", "SN1", "CO")]),
+        false,
+    );
+    let conn = faa_registry_mirror::db::open(&db).unwrap();
+    for tbl in [
+        "deregistered",
+        "documents",
+        "parse_errors",
+        "dealers",
+        "reserved",
+    ] {
+        assert_eq!(outbox_ops_after(&conn, tbl, 0), (0, 0, 0), "{tbl}");
+    }
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
