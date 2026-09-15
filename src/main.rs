@@ -46,7 +46,7 @@ enum Command {
         #[arg(long)]
         force: bool,
         /// Override FAA download User-Agent (else FAA_USER_AGENT, else Safari token)
-        #[arg(long)]
+        #[arg(long, env = "FAA_USER_AGENT")]
         faa_user_agent: Option<String>,
     },
     /// Show current registration and ownership history for an N-number or Mode S hex
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
             force,
             faa_user_agent,
         } => {
-            let stats = ingest::ingest(&IngestOptions {
+            ingest::ingest(&IngestOptions {
                 db_path: cli.db,
                 zip_path: zip,
                 cache_dir,
@@ -90,28 +90,6 @@ fn main() -> Result<()> {
                 force,
                 user_agent: resolve_user_agent(faa_user_agent.as_deref()),
             })?;
-            if stats.skipped_same_zip {
-                println!(
-                    "ingest skipped  same zip_hash as last ok run ({})",
-                    stats.zip_hash
-                );
-            } else {
-                println!(
-                    "ingest ok  master={}  new={}  changed={}  closed={}  unchanged={}  dereg_new={}  dereg_changed={}  dereg_closed={}  docs={}  dealers={}  reserved={}  skipped={}",
-                    stats.master_rows,
-                    stats.new_rows,
-                    stats.changed_rows,
-                    stats.closed_rows,
-                    stats.unchanged_rows,
-                    stats.dereg_new,
-                    stats.dereg_changed,
-                    stats.dereg_closed,
-                    stats.documents_inserted,
-                    stats.dealer_rows,
-                    stats.reserved_rows,
-                    stats.skipped_rows
-                );
-            }
         }
         Command::Lookup { n_number } => {
             let conn = faa_registry_mirror::db::open(&cli.db)?;

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -62,6 +63,7 @@ pub struct IngestStats {
 }
 
 pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
+    let started = Instant::now();
     let (zip_bytes, source) = if let Some(path) = &opts.zip_path {
         (
             download::read_zip_file(path)?,
@@ -92,7 +94,11 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
             if prev == zip_hash {
                 record_skipped_run(&work, &as_of, &started_at, &source, &zip_hash)?;
                 work.nudge.send();
-                tracing::info!(zip_hash = %zip_hash, "same zip_hash as last ok run; skipping SCD");
+                tracing::info!(
+                    zip_hash = %zip_hash,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "same zip_hash as last ok run; skipping SCD"
+                );
                 return Ok(IngestStats {
                     source,
                     zip_hash,
@@ -144,6 +150,12 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
             ),
         )?;
         work.nudge.send();
+        tracing::error!(
+            master_rows = master.records.len(),
+            min_master_rows = opts.min_master_rows,
+            duration_ms = started.elapsed().as_millis() as u64,
+            "MASTER.txt below floor; refusing ingest"
+        );
         bail!(
             "MASTER.txt has {} data rows; expected at least {} (truncated dump?)",
             master.records.len(),
@@ -191,6 +203,7 @@ pub fn ingest(opts: &IngestOptions) -> Result<IngestStats> {
     work.nudge.send();
 
     tracing::info!(
+        duration_ms = started.elapsed().as_millis() as u64,
         master = stats.master_rows,
         new = stats.new_rows,
         changed = stats.changed_rows,
