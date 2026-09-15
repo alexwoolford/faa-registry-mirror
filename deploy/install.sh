@@ -51,6 +51,12 @@ NLOGIN="/usr/sbin/nologin"
 if ! id -u "$USER_NAME" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE" --shell "$NLOGIN" "$USER_NAME" || true
 fi
+if getent group state-capture >/dev/null 2>&1; then
+  usermod -aG state-capture "$USER_NAME" || true
+  mkdir -p /var/lib/state-capture/announce
+  chgrp state-capture /var/lib/state-capture/announce || true
+  chmod 0775 /var/lib/state-capture/announce || true
+fi
 mkdir -p "$PREFIX"/{bin,scripts,etc,docs} \
   "$STATE"/work \
   "$STATE"/cache \
@@ -94,11 +100,13 @@ if command -v restorecon >/dev/null 2>&1; then
 fi
 
 systemctl daemon-reload
-systemctl enable --now faa-registry-mirror-ingest.timer
+# Do not --now: Persistent=true would catch up immediately after install.
+systemctl enable faa-registry-mirror-ingest.timer
 
 echo "installed:"
 echo "  prefix=$PREFIX state=$STATE"
 echo "  publish: $STATE/current/faa-registry.sqlite"
 echo "  logs: journalctl -u faa-registry-mirror-ingest.service"
-echo "  timer: faa-registry-mirror-ingest.timer enabled (daily 05:45 UTC + 15m jitter)"
+echo "  timer: faa-registry-mirror-ingest.timer enabled (daily 05:45 UTC + 15m jitter; not started)"
 echo "  env: $ENV_DST (chmod 600; empty FAA_USER_AGENT uses the Safari token)"
+echo "  first run: sudo systemctl start faa-registry-mirror-ingest.service"

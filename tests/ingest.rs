@@ -499,7 +499,10 @@ fn master_change_emits_close_u_and_insert_i() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(after_u.contains("\"is_current\":0") || after_u.contains("\"is_current\": 0"), "{after_u}");
+    assert!(
+        after_u.contains("\"is_current\":0") || after_u.contains("\"is_current\": 0"),
+        "{after_u}"
+    );
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
